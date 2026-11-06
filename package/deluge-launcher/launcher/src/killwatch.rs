@@ -65,6 +65,16 @@ impl KillWatch {
         self.maybe_fire(now_ms)
     }
 
+    /// Like [`on_button`](Self::on_button), but presses that arrive while no
+    /// app is running are dropped, so a key held or pressed as one app exits
+    /// can't half-arm the chord for the next.
+    pub fn on_app_button(&mut self, app_running: bool, id: u8, pressed: bool, now_ms: u64) -> bool {
+        if !app_running {
+            return false;
+        }
+        self.on_button(id, pressed, now_ms)
+    }
+
     pub fn poll(&mut self, now_ms: u64) -> bool {
         self.maybe_fire(now_ms)
     }
@@ -147,5 +157,17 @@ mod tests {
         kw.on_button(LEARN, true, 6000);
         assert!(!kw.poll(6999));
         assert!(kw.poll(7000));
+    }
+
+    #[test]
+    fn inactive_presses_are_ignored() {
+        let mut kw = KillWatch::new(1000);
+        // SHIFT pressed after the app exited (watcher still draining): no app,
+        // so it must not be remembered for the next one.
+        assert!(!kw.on_app_button(false, SHIFT, true, 0));
+        // Next app: TRIPLETS + LEARN alone must not fire.
+        kw.on_app_button(true, TRIPLETS, true, 100);
+        kw.on_app_button(true, LEARN, true, 100);
+        assert!(!kw.poll(5000));
     }
 }

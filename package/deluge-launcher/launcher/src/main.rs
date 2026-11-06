@@ -128,6 +128,7 @@ fn main() {
                                     {
                                         running = Some(r);
                                         shift_held = false;
+                                        kw.reset();
                                     }
                                 }
                                 Screen::Settings => model.activate_settings_item(),
@@ -149,13 +150,18 @@ fn main() {
                 }
             }
             Ok(Msg::Button(id, pressed)) => {
-                if kw.on_button(id, pressed, now_ms()) {
+                if kw.on_app_button(running.is_some(), id, pressed, now_ms()) {
                     stop_app(&mut running, now_ms());
                 }
             }
             Ok(Msg::ChildExited(exit)) => {
                 let r = running.take();
                 let killed_by_user = r.as_ref().is_some_and(|r| r.killed_by_user);
+                // The leader is gone; kill anything it left in its group
+                // before reopening, or a helper could keep DIN MIDI etc.
+                if let Some(r) = r.as_ref() {
+                    supervisor::reap_group(r.pid);
+                }
                 if let Some(w) = r.and_then(|r| r.watcher) {
                     w.stop();
                 }

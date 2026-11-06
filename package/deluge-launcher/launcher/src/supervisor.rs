@@ -42,10 +42,16 @@ pub fn launch(path: &Path, log: Stdio) -> io::Result<Launched> {
     cmd.stdin(Stdio::null());
     // stdout goes to the log; pre_exec dups it onto stderr so both share it.
     cmd.stdout(log);
-    // SAFETY: setsid and dup2 are async-signal-safe and touch no Rust heap state.
+    // SAFETY: setsid, prctl and dup2 are async-signal-safe and touch no Rust heap state.
     unsafe {
         cmd.pre_exec(|| {
             if libc::setsid() < 0 {
+                return Err(io::Error::last_os_error());
+            }
+            // If the launcher dies (sv down, a panic), take the app with it
+            // rather than leave it holding the instrument. Fires when the
+            // launching thread exits, so always launch from the main thread.
+            if libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGKILL) < 0 {
                 return Err(io::Error::last_os_error());
             }
             if libc::dup2(1, 2) < 0 {
@@ -65,6 +71,13 @@ pub fn signal_group(pid: i32, sig: i32) {
     unsafe {
         libc::kill(-pid, sig);
     }
+}
+
+/// SIGKILL whatever is left of the group after its leader has exited, so a
+/// helper that ignored SIGTERM (or outlived a normal exit) can't keep the
+/// instrument's devices from the launcher and the next app.
+pub fn reap_group(pid: i32) {
+    signal_group(pid, libc::SIGKILL);
 }
 
 /// Graceful stop: SIGTERM on request, SIGKILL once `grace_ms` has passed.
@@ -220,5 +233,62 @@ mod tests {
         l.child.wait().unwrap();
         let text = std::fs::read_to_string(&log).unwrap();
         assert!(text.contains("out") && text.contains("err"), "{text:?}");
+    }
+
+    #[test]
+    fn reap_group_kills_leftover_helpers() {
+        // The leader exits on SIGTERM; a helper in its group ignores it.
+        let pidfile = std::env::temp_dir().join(format!("launcher-helper-{}", std::process::id()));
+        let _ = std::fs::remove_file(&pidfile);
+        let mut l = sh(&format!(
+            "sh -c 'trap \"\" TERM; echo $$ > {p}; while :; do sleep 1; done' &\nwait",
+            p = pidfile.display()
+        ));
+        let mut helper = 0;
+        for _ in 0..100 {
+            if let Some(p) = std::fs::read_to_string(&pidfile).ok().and_then(|s| s.trim().parse().ok()) {
+                helper = p;
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(helper > 0);
+        signal_group(l.pid, libc::SIGTERM);
+        l.child.wait().unwrap(); // leader gone, helper still running
+        assert!(alive(helper));
+        reap_group(l.pid);
+        let mut gone = false;
+        for _ in 0..100 {
+            let stat = std::fs::read_to_string(format!("/proc/{helper}/stat")).unwrap_or_default();
+            if stat.is_empty() || stat.contains(") Z") {
+                gone = true;
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(gone, "helper {helper} survived reap_group");
+    }
+
+    #[test]
+    fn app_dies_with_the_launcher() {
+        // PR_SET_PDEATHSIG fires when the launching thread exits, so launch
+        // from a short-lived thread and check the app is killed.
+        let pid = std::thread::spawn(|| {
+            let l = sh("while :; do sleep 1; done");
+            std::mem::forget(l.child);
+            l.pid
+        })
+        .join()
+        .unwrap();
+        let mut gone = false;
+        for _ in 0..100 {
+            let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).unwrap_or_default();
+            if stat.is_empty() || stat.contains(") Z") {
+                gone = true;
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(gone, "app {pid} outlived the thread that launched it");
     }
 }

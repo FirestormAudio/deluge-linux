@@ -19,19 +19,32 @@ DELUGE_LAUNCHER_CARGO_ENV = DELUGE_SDK_ROOT=$(STAGING_DIR)/usr
 
 # Buildroot vendors crates only for downloaded sources, so a local package
 # would build --offline with its git dependencies missing. Build the same
-# way pkg-cargo does, minus --offline: cargo fetches the pinned revisions,
-# and --locked holds it to Cargo.lock.
+# way pkg-cargo does, minus --offline: cargo fetches the pinned revisions
+# (into $(BR_CARGO_HOME), under the download dir), and --locked holds it to
+# Cargo.lock. So this package needs network access at build time, `make
+# source` doesn't prefetch its crates, and legal-info doesn't include the
+# deluge-sdk sources (public at the revision pinned in launcher/Cargo.toml).
+#
+# --ignore-rust-version: deluge-sdk's grid toolkit pulls in its bare-metal
+# rza1-* crates, which declare rust-version 1.97; Buildroot ships 1.96.1,
+# which builds the launcher fine.
 define DELUGE_LAUNCHER_BUILD_CMDS
 	cd $(@D) && \
 	$(TARGET_MAKE_ENV) \
 		$(TARGET_CONFIGURE_OPTS) \
 		$(PKG_CARGO_ENV) \
 		$(DELUGE_LAUNCHER_CARGO_ENV) \
-		cargo build --release --manifest-path Cargo.toml --locked --ignore-rust-version
+		cargo build \
+			$(if $(BR2_ENABLE_DEBUG),,--release) \
+			--manifest-path Cargo.toml \
+			--locked \
+			--ignore-rust-version \
+			$(DELUGE_LAUNCHER_CARGO_BUILD_OPTS)
 endef
 
 define DELUGE_LAUNCHER_INSTALL_TARGET_CMDS
-	$(INSTALL) -D -m 0755 $(@D)/target/$(RUSTC_TARGET_NAME)/release/launcher \
+	$(INSTALL) -D -m 0755 \
+		$(@D)/target/$(RUSTC_TARGET_NAME)/$(if $(BR2_ENABLE_DEBUG),debug,release)/launcher \
 		$(TARGET_DIR)/usr/bin/deluge-app
 endef
 

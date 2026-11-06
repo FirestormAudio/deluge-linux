@@ -86,5 +86,10 @@ launcher to take over.
 `package/deluge-launcher/launcher/` is a Rust crate built with Buildroot's
 `cargo-package`, against deluge-sdk's `libdeluge` bindings and UI toolkit
 (pinned by git revision in its `Cargo.toml`). It is GPL-3.0-or-later, because
-that toolkit and its fonts are. Run its tests on the host as described in
+that toolkit and its fonts are.
+
+Buildroot doesn't vendor crates for in-tree packages, so building `platform`
+fetches those crates from GitHub at build time: it needs network access, and
+`make source` doesn't prefetch them. The deluge-sdk sources it links are
+public at the pinned revision. Run its tests on the host as described in
 [CONTRIBUTING.md](../CONTRIBUTING.md#running-the-tests).
