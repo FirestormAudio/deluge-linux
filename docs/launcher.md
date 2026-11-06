@@ -1,6 +1,6 @@
 # The launcher
 
-The `platform` image (`LINUX-platform.ELF` in a release, or `make platform
+The `platform` image (`LINUX.ELF` in a release, or `make platform
 appelf`) boots into an app launcher: boot Linux once, then switch between apps
 on the SD card from the Deluge's own OLED and buttons, without rebooting.
 

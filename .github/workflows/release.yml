@@ -48,19 +48,18 @@ jobs:
       - name: Build the base bundle
         run: make bundle VERSION=${GITHUB_REF_NAME#v}
 
-      # Prebuilt app-loader images for convenience, packed straight from the
-      # bundle (no rebuild): one per profile, ready to drop on the SD card.
-      # Each profile has its own kernel, so pack from boot/<profile>/, then
-      # validate the result against the same map the packer used.
-      - name: Pack the app-loader ELFs from the bundle
+      # The prebuilt image: the platform profile (launcher, shell, SSH), packed
+      # straight from the bundle (no rebuild) and ready to drop in the SD
+      # card's /APPS/. Pack from its own boot/platform/ kernel, then validate
+      # the result against the same map the packer used. base has no app of
+      # its own, so it ships only inside the bundle, for deluge-mkimage.
+      - name: Pack LINUX.ELF from the bundle
         run: |
           set -euo pipefail
           B=out/deluge-base-${GITHUB_REF_NAME#v}
-          for p in base platform; do
-            python3 tools/mk-app-elf.py --map "$B/manifest.json" --dir "$B/boot/$p" \
-                --rootfs "$B/rootfs/$p.cpio" "out/LINUX-$p.ELF"
-            python3 tools/check-app-elf.py --map "$B/manifest.json" "out/LINUX-$p.ELF"
-          done
+          python3 tools/mk-app-elf.py --map "$B/manifest.json" --dir "$B/boot/platform" \
+              --rootfs "$B/rootfs/platform.cpio" out/LINUX.ELF
+          python3 tools/check-app-elf.py --map "$B/manifest.json" out/LINUX.ELF
 
       - name: Publish
         uses: softprops/action-gh-release@v2
@@ -68,5 +67,4 @@ jobs:
           files: |
             out/deluge-base-*.tar.zst
             out/deluge-base-*.tar.zst.sha256
-            out/LINUX-base.ELF
-            out/LINUX-platform.ELF
+            out/LINUX.ELF

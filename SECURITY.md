@@ -11,7 +11,7 @@ and several things that would be findings elsewhere are deliberate here:
   (`ttyGS0`), and a dropbear SSH server that accepts password logins on port 22
   over the USB network link (`usb0`, 192.168.7.2). That profile exists to be
   poked at. Anyone who can reach the cable or the link can log in as root,
-  and that includes the prebuilt `LINUX-platform.ELF` attached to releases.
+  and that includes the prebuilt `LINUX.ELF` attached to releases.
   Change the password before you build if that matters to you, and don't use
   `platform` on a host or network you don't trust.
 - The `base` profile has no login surface: no getty, no SSH, and a kernel

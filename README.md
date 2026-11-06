@@ -54,7 +54,12 @@ libdeluge and deluge-sdk consume to build app images without running Buildroot. 
 
 ## Quickstart
 
-You need a host compiler, `make`, `git`, and Buildroot's host prerequisites. The
+**Just want to try it?** Each [release](https://github.com/FirestormAudio/deluge-linux/releases)
+has a prebuilt `LINUX.ELF`: the `platform` image, which boots into the
+[app launcher](docs/launcher.md). Read [Before you start](docs/boot.md#before-you-start),
+copy it to the SD card's `/APPS/`, and pick it from the app-loader's boot menu.
+
+To build it yourself, you need a host compiler, `make`, `git`, and Buildroot's host prerequisites. The
 cross-toolchain is a prebuilt tarball Buildroot downloads, so you don't need one
 installed.
 

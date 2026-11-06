@@ -144,11 +144,12 @@ Two workflows, two different jobs:
 - `release.yml` runs on every tag push (`v*`). It runs the same pytest suite
   first and only builds if that passes, so a broken packer can't spend hours
   building and then publish a bundle nobody can unpack. Then it runs `make
-  bundle VERSION=<tag-without-v>`, packs `LINUX-base.ELF` and
-  `LINUX-platform.ELF` from each profile's `boot/<profile>/` and cpio in the
-  bundle without a rebuild, validates both with `tools/check-app-elf.py`, and
-  publishes `deluge-base-<version>.tar.zst` plus its `.sha256` and both ELFs as
-  a GitHub release.
+  bundle VERSION=<tag-without-v>`, packs `LINUX.ELF` (the `platform`
+  profile, which boots into the [launcher](launcher.md)) from the bundle's
+  `boot/platform/` and `rootfs/platform.cpio` without a rebuild, validates it
+  with `tools/check-app-elf.py`, and publishes `deluge-base-<version>.tar.zst`
+  plus its `.sha256` and `LINUX.ELF` as a GitHub release. `base` has no app of
+  its own, so it ships only inside the bundle.
 
 Only tags produce a bundle. A plain push to `main` never does. If you need a
 bundle to test libdeluge or deluge-sdk changes against, tag a release (or run `make bundle`
