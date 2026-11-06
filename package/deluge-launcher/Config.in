@@ -1,0 +1,15 @@
+config BR2_PACKAGE_DELUGE_LAUNCHER
+	bool "deluge-launcher"
+	depends on BR2_PACKAGE_HOST_RUSTC_TARGET_ARCH_SUPPORTS
+	depends on BR2_PACKAGE_ALSA_LIB
+	select BR2_PACKAGE_HOST_RUSTC
+	select BR2_PACKAGE_LIBDELUGE
+	help
+	  The platform image's app launcher, installed as the app slot
+	  (/usr/bin/deluge-app). It lists the ARM executables in the SD card's
+	  /LINUX/APPS/ on the OLED, runs the one you pick, and returns to the
+	  list when it exits or when SHIFT+TRIPLETS+LEARN is held for a second.
+	  Each app's output goes to /LINUX/log/<app>.log. Enable it in the
+	  platform profile only: base is for single-app images.
+
+	  GPL-3.0-or-later (it uses deluge-sdk's GPL UI toolkit and fonts).

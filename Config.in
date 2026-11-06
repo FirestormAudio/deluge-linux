@@ -1,5 +1,6 @@
 menu "Deluge packages"
 	source "$BR2_EXTERNAL_DELUGE_PATH/package/deluge-alsa-static/Config.in"
+	source "$BR2_EXTERNAL_DELUGE_PATH/package/deluge-launcher/Config.in"
 	source "$BR2_EXTERNAL_DELUGE_PATH/package/deluge-splash/Config.in"
 	source "$BR2_EXTERNAL_DELUGE_PATH/package/libdeluge/Config.in"
 endmenu

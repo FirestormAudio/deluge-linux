@@ -1,0 +1,6 @@
+#!/bin/sh
+# Placeholder app slot for the base profile. deluge-mkimage bakes a real app
+# over this path; until then it proves boot-to-app and stays alive. It does
+# not arm the watchdog.
+echo "deluge-app (STUB): base profile up — $(uname -srm)"
+while :; do /bin/busybox sleep 60; done

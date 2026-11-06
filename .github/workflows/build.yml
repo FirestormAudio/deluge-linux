@@ -20,6 +20,32 @@ jobs:
       - run: python3 -m pip install pytest
       - run: python3 -m pytest tests/ -v
 
+  # The platform launcher's unit tests, on the host against a host build of
+  # libdeluge (the tag package/libdeluge pins).
+  launcher:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+      - name: Build libdeluge for the host
+        run: |
+          tag=$(sed -n 's/^LIBDELUGE_VERSION = //p' package/libdeluge/libdeluge.mk)
+          git clone --depth 1 -b "$tag" https://github.com/FirestormAudio/libdeluge "$RUNNER_TEMP/libdeluge"
+          cmake -S "$RUNNER_TEMP/libdeluge" -B "$RUNNER_TEMP/libdeluge/build" \
+                -DLIBDELUGE_EXAMPLES=OFF -DLIBDELUGE_TESTS=OFF
+          cmake --build "$RUNNER_TEMP/libdeluge/build"
+          cmake --install "$RUNNER_TEMP/libdeluge/build" --prefix "$RUNNER_TEMP/libdeluge-host"
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - name: Test
+        working-directory: package/deluge-launcher/launcher
+        env:
+          DELUGE_SDK_ROOT: ${{ runner.temp }}/libdeluge-host
+        run: |
+          cargo test --locked
+          cargo clippy --locked --all-targets -- -D warnings
+
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 180

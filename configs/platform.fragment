@@ -1,9 +1,13 @@
 # Platform profile: hackable — common + platform overlays. Console getty +
-# USB NCM networking (usb0) + dropbear SSH. It boots the same
-# /usr/bin/deluge-app slot as base (from the common overlay); the platform
-# overlay only adds the shell/network services on top.
+# USB NCM networking (usb0) + dropbear SSH. Its app slot
+# (/usr/bin/deluge-app, started by the common overlay's runit service) is the
+# launcher, unless deluge-mkimage bakes an app in its place.
 BR2_ROOTFS_OVERLAY="$(BR2_EXTERNAL_DELUGE_PATH)/board/synthstrom/deluge/rootfs/overlay/common $(BR2_EXTERNAL_DELUGE_PATH)/board/synthstrom/deluge/rootfs/overlay/platform"
 BR2_PACKAGE_DROPBEAR=y
+
+# The app launcher for /LINUX/APPS/ (Rust; pulls in host-rustc).
+BR2_PACKAGE_HOST_RUSTC=y
+BR2_PACKAGE_DELUGE_LAUNCHER=y
 
 # ALSA command-line tools for debugging on the hackable image (aplay/arecord
 # drive the gadget streams during USB clock measurement). alsa-lib itself lives
