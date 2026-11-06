@@ -62,6 +62,19 @@ pip install pytest
 python3 -m pytest tests/ -v
 ```
 
+The launcher (`package/deluge-launcher/launcher/`) has its own Rust unit tests.
+They run on the host against a host build of libdeluge, the same tag
+`package/libdeluge` pins:
+
+```sh
+git clone --depth 1 -b v0.1.0 https://github.com/FirestormAudio/libdeluge /tmp/libdeluge
+cmake -S /tmp/libdeluge -B /tmp/libdeluge/build -DLIBDELUGE_EXAMPLES=OFF -DLIBDELUGE_TESTS=OFF
+cmake --build /tmp/libdeluge/build
+cmake --install /tmp/libdeluge/build --prefix /tmp/libdeluge-host
+cd package/deluge-launcher/launcher
+DELUGE_SDK_ROOT=/tmp/libdeluge-host cargo test
+```
+
 What it covers:
 
 - `test_memmap.py` covers `tools/memmap.py`'s loader: parsing
@@ -75,6 +88,9 @@ What it covers:
   addresses `memory-map.json` specifies, checks the rootfs is wrapped in a
   uImage header, and checks `tools/check-app-elf.py` accepts what was just
   packed and rejects a corrupted one.
+- `test_profiles.py` pins the profile layout: the placeholder app slot is in
+  `base`'s overlay only, and the launcher package is enabled in `platform`
+  only.
 - `tests/mkimage/` covers `deluge-mkimage` (`tools/deluge_mkimage/`): the
   newc cpio writer and reader (cross-checked by extracting with the system
   `cpio`), ELF packing and checking, app validation (`appelf`), the dynamic

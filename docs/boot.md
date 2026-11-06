@@ -135,6 +135,10 @@ In both profiles the kernel console goes to RTT (`hvc0`) and to USB CDC-ACM
 uploaded with. Only `platform` adds a login on that port. See
 [debugging.md](debugging.md).
 
+Once the system is up, runit starts the app slot, `/usr/bin/deluge-app`. In
+`base` that is a placeholder until `deluge-mkimage` bakes an app into it; in
+`platform` it is the [launcher](launcher.md).
+
 [app-loader]: https://github.com/FirestormAudio/deluge-sdk/blob/main/docs/app-loader.md
 [deluge-sdk]: https://github.com/FirestormAudio/deluge-sdk
 [deluge-sdk release]: https://github.com/FirestormAudio/deluge-sdk/releases

@@ -90,8 +90,9 @@ installed.
 4. **Verify it booted.** The `base` profile has no login by design (its USB
    serial port shows kernel messages only), so what you'll see is the instrument's own UI coming up on the pad grid and OLED. For
    a shell and confirmation that the drivers loaded, build `make platform`
-   instead; it adds a USB console and SSH. See
-   [docs/debugging.md](docs/debugging.md).
+   instead; it adds a USB console and SSH, and boots into the
+   [app launcher](docs/launcher.md) for the apps in the card's `/LINUX/APPS/`.
+   See [docs/debugging.md](docs/debugging.md).
 
    `platform` logs in as `root` with the password `deluge`, on the USB console
    and over SSH. Change it (`BR2_TARGET_GENERIC_ROOT_PASSWD` in
@@ -131,6 +132,8 @@ into them at build time; nothing under `.buildroot/` is ever edited by hand.
   running the tests, adding a driver or package, patching upstream.
 - [docs/hardware.md](docs/hardware.md): the board itself. The SoC, the
   peripherals, and how each one is wired. Start here.
+- [docs/launcher.md](docs/launcher.md): the `platform` image's app launcher.
+  Putting apps on the card, the escape chord, logs and shutdown.
 - [docs/boot.md](docs/boot.md): safety notes, app-loader to U-Boot to kernel,
   the memory map, and how to get an image onto the board.
 - [docs/drivers.md](docs/drivers.md): the `deluge-*` drivers and the userspace
@@ -144,4 +147,6 @@ into them at build time; nothing under `.buildroot/` is ever edited by hand.
 ## License
 
 GPL-2.0. The kernel drivers are derivative works of Linux; the U-Boot board
-support is GPL-2.0-or-later.
+support is GPL-2.0-or-later. The exception is the launcher in
+`package/deluge-launcher/`, which is GPL-3.0-or-later (see its `LICENSE`)
+because the deluge-sdk UI toolkit and fonts it builds on are.
