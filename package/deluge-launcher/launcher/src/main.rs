@@ -84,7 +84,7 @@ fn main() {
                     if kw.on_button(ev.id, pressed, t) {
                         if let Some(pid) = running_pid {
                             killed_by_user = true;
-                            supervisor::kill_group(pid);
+                            supervisor::signal_group(pid, libc::SIGKILL);
                         }
                     }
                     // Screen-aware clicks, only while browsing.
@@ -141,7 +141,7 @@ fn main() {
         if kw.poll(t) {
             if let Some(pid) = running_pid {
                 killed_by_user = true;
-                supervisor::kill_group(pid);
+                supervisor::signal_group(pid, libc::SIGKILL);
             }
         }
         model.tick(t);
@@ -208,7 +208,7 @@ fn launch_selected(
         .map(|e| e.display_name.clone())
         .unwrap_or_default();
 
-    match supervisor::launch(&path) {
+    match supervisor::launch(&path, applog::open_log(&applog::log_path(&apps::apps_dir(), &path))) {
         Ok(supervisor::Launched { pid, mut child }) => {
             *running_pid = Some(pid);
             *killed_by_user = false;
