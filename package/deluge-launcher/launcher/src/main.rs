@@ -6,8 +6,10 @@
 
 mod applog;
 mod apps;
+mod buttons;
 mod killwatch;
 mod model;
+mod panel;
 mod supervisor;
 mod ui;
 

@@ -128,4 +128,24 @@ mod tests {
         assert!(!kw.on_button(SHIFT, true, 0));
         assert!(!kw.poll(5000));
     }
+
+    #[test]
+    fn chord_held_across_exit_does_not_fire_again() {
+        let mut kw = KillWatch::new(1000);
+        kw.on_button(SHIFT, true, 0);
+        kw.on_button(TRIPLETS, true, 0);
+        kw.on_button(LEARN, true, 0);
+        assert!(kw.poll(1000));
+        // The app exits; the launcher resets the watch while the chord is
+        // still physically held (no repeat events arrive).
+        kw.reset();
+        assert!(!kw.poll(5000));
+        // Releasing and re-pressing one key re-arms it.
+        kw.on_button(LEARN, false, 6000);
+        kw.on_button(SHIFT, true, 6000);
+        kw.on_button(TRIPLETS, true, 6000);
+        kw.on_button(LEARN, true, 6000);
+        assert!(!kw.poll(6999));
+        assert!(kw.poll(7000));
+    }
 }
