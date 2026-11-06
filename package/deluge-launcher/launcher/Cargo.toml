@@ -1,0 +1,18 @@
+[package]
+name = "launcher"
+version = "0.1.0"
+edition = "2021"
+publish = false
+license = "GPL-3.0-or-later"
+description = "The platform image's app launcher for the Synthstrom Deluge running deluge-linux."
+
+[dependencies]
+libdeluge = { git = "https://github.com/FirestormAudio/deluge-sdk", rev = "9de6c02ae31fc32237f316eef655034c51c7565d" }
+deluge-linux-ui = { git = "https://github.com/FirestormAudio/deluge-sdk", rev = "9de6c02ae31fc32237f316eef655034c51c7565d" }
+deluge-ui-toolkit = { git = "https://github.com/FirestormAudio/deluge-sdk", rev = "9de6c02ae31fc32237f316eef655034c51c7565d" }
+embedded-graphics = "0.8"
+libc = "0.2"
+
+[profile.release]
+lto = true
+opt-level = "s"
