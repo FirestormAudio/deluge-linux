@@ -4,6 +4,9 @@
 # Build output
 /out/
 
+# Compiler cache (BR2_CCACHE_DIR in configs/deluge_defconfig)
+/.ccache/
+
 # Per-checkout Buildroot source overrides (see local.mk.example)
 /local.mk
 

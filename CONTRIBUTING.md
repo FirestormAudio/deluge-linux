@@ -46,6 +46,13 @@ kernel; after that it's incremental. CI's 2-core hosted runners take hours,
 which is why the workflows allow 180 minutes per profile and 240 for the
 bundle.
 
+Compiles go through ccache, kept in `.ccache/` at the repo root (gitignored,
+capped at 2 GB), so switching profiles, which always rebuilds the kernel, and
+`make clean` rebuilds are mostly cache hits. CI caches the same directory per
+profile. A build tree from before ccache was enabled needs one `make clean`
+to pick it up; `make distclean` also deletes the Buildroot checkout and its
+downloads, but never `.ccache/`.
+
 `make sdk` builds the relocatable cross-toolchain on its own. `make bundle`
 assembles the full release artifact, both profiles plus the toolchain, that
 libdeluge and deluge-sdk consume. See [docs/release.md](docs/release.md) if you're

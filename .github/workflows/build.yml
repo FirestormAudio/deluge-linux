@@ -74,8 +74,23 @@ jobs:
           key: dl-${{ hashFiles('Makefile', 'configs/deluge_defconfig') }}
           restore-keys: dl-
 
+      # Compiler cache. GitHub caches are immutable, so save a new one per run
+      # and restore the newest for this profile (then any profile's).
+      - name: Cache ccache
+        uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: ccache-${{ matrix.profile }}-${{ github.run_id }}
+          restore-keys: |
+            ccache-${{ matrix.profile }}-
+            ccache-
+
       - name: Build ${{ matrix.profile }}
         run: make ${{ matrix.profile }}
+
+      - name: ccache statistics
+        if: always()
+        run: .buildroot/output/host/bin/ccache --dir .ccache --show-stats || true
 
       - name: Pack the app-loader ELF
         run: make appelf

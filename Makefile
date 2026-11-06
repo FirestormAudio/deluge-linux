@@ -33,9 +33,16 @@ help:
 	@echo '  make clean | distclean'
 
 # --- pinned Buildroot ------------------------------------------------------
+# Init + fetch rather than clone: CI restores its download cache into
+# .buildroot/dl before Buildroot is fetched, and git clone refuses a
+# non-empty directory.
 $(BR)/Makefile:
 	@echo "=== Fetching Buildroot $(BUILDROOT_VERSION) ==="
-	git clone $(BUILDROOT_URL) $(BR)
+	mkdir -p $(BR)
+	git -C $(BR) init -q
+	git -C $(BR) remote add origin $(BUILDROOT_URL) 2>/dev/null || \
+	  git -C $(BR) remote set-url origin $(BUILDROOT_URL)
+	git -C $(BR) fetch origin
 	git -C $(BR) checkout --detach $(BUILDROOT_VERSION)
 
 buildroot: $(BR)/Makefile
