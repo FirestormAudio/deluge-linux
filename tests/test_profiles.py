@@ -25,3 +25,13 @@ def test_launcher_only_in_platform():
 
 def test_launcher_package_is_registered():
     assert "package/deluge-launcher/Config.in" in (REPO / "Config.in").read_text()
+
+
+def test_ccache_in_repo_and_cached_in_ci():
+    defconfig = _fragment("deluge_defconfig")
+    assert "BR2_CCACHE=y" in defconfig
+    assert 'BR2_CCACHE_DIR="$(BR2_EXTERNAL_DELUGE_PATH)/.ccache"' in defconfig
+    assert "/.ccache/" in (REPO / ".gitignore").read_text()
+    for wf in ("build.yml", "release.yml"):
+        text = (REPO / ".github/workflows" / wf).read_text()
+        assert "path: .ccache" in text, wf

@@ -22,6 +22,13 @@ BR2_TOOLCHAIN_EXTERNAL=y
 BR2_TOOLCHAIN_EXTERNAL_BOOTLIN=y
 BR2_TOOLCHAIN_EXTERNAL_BOOTLIN_ARMV7_EABIHF_MUSL_BLEEDING_EDGE=y
 
+# Compiler cache, kept in the repo (gitignored) so CI can cache it per profile
+# and a profile switch's kernel rebuild is mostly cache hits. Relative paths
+# (the default) let the cache survive moving the checkout.
+BR2_CCACHE=y
+BR2_CCACHE_DIR="$(BR2_EXTERNAL_DELUGE_PATH)/.ccache"
+BR2_CCACHE_INITIAL_SETUP="--max-size=2G"
+
 # Init: none from Buildroot — /init (base overlay) is PID 1 and execs runsvdir.
 BR2_INIT_NONE=y
 BR2_ROOTFS_DEVICE_CREATION_DYNAMIC_DEVTMPFS=y

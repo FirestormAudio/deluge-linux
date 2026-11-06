@@ -42,6 +42,16 @@ jobs:
           key: dl-${{ hashFiles('Makefile', 'configs/deluge_defconfig') }}
           restore-keys: dl-
 
+      # Compiler cache, shared with the build workflow's per-profile caches.
+      - name: Cache ccache
+        uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: ccache-bundle-${{ github.run_id }}
+          restore-keys: |
+            ccache-bundle-
+            ccache-
+
       # The bundle is the release: it builds both profiles + the SDK toolchain
       # and assembles boot/ + rootfs/ + toolchain/ + manifest.json into one
       # sha256-pinned tarball. This is what libdeluge and deluge-sdk pin and consume.
