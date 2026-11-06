@@ -99,11 +99,6 @@ impl Stopper {
             _ => None,
         }
     }
-
-    pub fn reset(&mut self) {
-        self.requested_at = None;
-        self.killed = false;
-    }
 }
 
 #[cfg(test)]
@@ -176,15 +171,6 @@ mod tests {
         assert_eq!(s.poll(1999), None);
         assert_eq!(s.poll(2000), Some(libc::SIGKILL));
         assert_eq!(s.poll(3000), None);
-    }
-
-    #[test]
-    fn stopper_reset_clears() {
-        let mut s = Stopper::new(2000);
-        s.request(0);
-        s.reset();
-        assert_eq!(s.poll(5000), None);
-        assert_eq!(s.request(6000), Some(libc::SIGTERM));
     }
 
     #[test]
