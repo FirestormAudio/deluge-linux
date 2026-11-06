@@ -1,0 +1,27 @@
+config SND_SOC_DELUGE_SSI
+	tristate "Synthstrom Deluge RZ/A1 SSIF CPU DAI"
+	depends on OF
+	select SND_SOC_GENERIC_DMAENGINE_PCM
+	help
+	  ASoC CPU DAI for the Synthstrom Deluge's RZ/A1L SSI0/SSIF0 (I2S,
+	  44.1 kHz, external AUDIO_X1 master clock, direct DMA, no SCUX).
+
+
+config SND_SOC_DELUGE_AUDIO
+	tristate "Synthstrom Deluge audio machine (sound card)"
+	depends on OF && GPIOLIB
+	select SND_SOC_DELUGE_SSI
+	select SND_SOC_DELUGE_MIDI
+	help
+	  Sound card for the Synthstrom Deluge: SSI0 <-> dummy codec, with the
+	  codec power-up sequence (mclk, 5 ms, CODEC_POWER GPIO). Also binds the
+	  DIN MIDI aux component (deluge-midi on SCIF0).
+
+config SND_SOC_DELUGE_MIDI
+	tristate "Synthstrom Deluge DIN MIDI (SCIF0 rawmidi)"
+	depends on OF
+	select SND_RAWMIDI
+	help
+	  DIN 5-pin MIDI in/out for the Synthstrom Deluge over SCIF0 (31250 bps,
+	  interrupt-driven RX), exposed as an ALSA rawmidi device on the Deluge sound
+	  card via an ASoC auxiliary component.

@@ -1,0 +1,8 @@
+config BR2_PACKAGE_LIBDELUGE
+	bool "libdeluge"
+	depends on BR2_PACKAGE_ALSA_LIB
+	help
+	  The Deluge userspace C library (libdeluge): libdeluge.a + public headers
+	  + deluge.pc, installed into the staging sysroot ONLY (never the target
+	  rootfs). Apps statically link it; it ships in the SDK sysroot the base
+	  bundle publishes, which is how C/C++ and Rust apps build against it.

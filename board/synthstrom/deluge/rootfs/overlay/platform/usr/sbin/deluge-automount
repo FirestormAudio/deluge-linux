@@ -1,0 +1,20 @@
+#!/bin/sh
+# mdev calls this for sd* block devices. $MDEV = device name (e.g. sda1),
+# $ACTION = add|remove. Mount partitions under /media/<name>; unmount on remove.
+dev="/dev/$MDEV"
+mnt="/media/$MDEV"
+case "$ACTION" in
+add)
+	case "$MDEV" in
+	sd[a-z][0-9]*)                     # partitions only, not whole disks
+		/bin/busybox mkdir -p "$mnt"
+		/bin/busybox mount -t auto -o noatime "$dev" "$mnt" 2>/dev/null || \
+			/bin/busybox rmdir "$mnt" 2>/dev/null
+		;;
+	esac
+	;;
+remove)
+	/bin/busybox umount -l "$mnt" 2>/dev/null
+	/bin/busybox rmdir "$mnt" 2>/dev/null
+	;;
+esac

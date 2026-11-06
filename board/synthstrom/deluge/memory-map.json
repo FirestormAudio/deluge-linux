@@ -1,0 +1,11 @@
+{
+  "comment": "Load addresses for the app-loader ELF. THE source of truth: tools/mk-app-elf.py reads this, and the SDK ships it as the bundle's manifest.json. U-Boot's compiled-in bootcmd (board/synthstrom/deluge/uboot/configs/deluge_defconfig) is the one place these addresses are necessarily duplicated — change them together. SDRAM is 64 MB at 0x0C000000.",
+  "version": "0.2.0",
+  "segments": [
+    { "file": "u-boot.bin",          "load": "0x0C000000" },
+    { "file": "r7s72102-deluge.dtb", "load": "0x0DF00000" },
+    { "file": "zImage",              "load": "0x0E000000" },
+    { "file": "rootfs.uimg",         "load": "0x0E800000",
+      "max_size": "0x1000000", "generated": true }
+  ]
+}

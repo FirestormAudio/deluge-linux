@@ -1,0 +1,72 @@
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+jobs:
+  # Gate the multi-hour bundle build on the packer tests. Without this, a tag
+  # whose packing tools are broken burns a runner for hours and then publishes
+  # a bundle nobody can unpack.
+  tools:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: sudo apt-get update && sudo apt-get install -y cpio
+      - run: python3 -m pip install pytest
+      - run: python3 -m pytest tests/ -v
+
+  release:
+    needs: tools
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Buildroot's host prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential bc cpio file git rsync unzip wget \
+                                  python3 libncurses-dev device-tree-compiler zstd
+
+      - name: Cache Buildroot downloads
+        uses: actions/cache@v4
+        with:
+          path: .buildroot/dl
+          key: dl-${{ hashFiles('Makefile', 'configs/deluge_defconfig') }}
+          restore-keys: dl-
+
+      # The bundle is the release: it builds both profiles + the SDK toolchain
+      # and assembles boot/ + rootfs/ + toolchain/ + manifest.json into one
+      # sha256-pinned tarball. This is what libdeluge and deluge-sdk pin and consume.
+      - name: Build the base bundle
+        run: make bundle VERSION=${GITHUB_REF_NAME#v}
+
+      # Prebuilt app-loader images for convenience, packed straight from the
+      # bundle (no rebuild): one per profile, ready to drop on the SD card.
+      # Each profile has its own kernel, so pack from boot/<profile>/, then
+      # validate the result against the same map the packer used.
+      - name: Pack the app-loader ELFs from the bundle
+        run: |
+          set -euo pipefail
+          B=out/deluge-base-${GITHUB_REF_NAME#v}
+          for p in base platform; do
+            python3 tools/mk-app-elf.py --map "$B/manifest.json" --dir "$B/boot/$p" \
+                --rootfs "$B/rootfs/$p.cpio" "out/LINUX-$p.ELF"
+            python3 tools/check-app-elf.py --map "$B/manifest.json" "out/LINUX-$p.ELF"
+          done
+
+      - name: Publish
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            out/deluge-base-*.tar.zst
+            out/deluge-base-*.tar.zst.sha256
+            out/LINUX-base.ELF
+            out/LINUX-platform.ELF

@@ -1,0 +1,16 @@
+# Networking for the `platform` profile — layered onto the networkless base
+# deluge.config via BR2_LINUX_KERNEL_CONFIG_FRAGMENT_FILES (see
+# configs/platform.fragment). Derived as the set of CONFIG_*=y symbols that the
+# base kernel drops when CONFIG_NET is off; restores platform's usb0 (NCM) + SSH.
+#
+# Note: comm -23 against the pre-edit committed config also emitted
+# CONFIG_GCC_PLUGINS=y, CONFIG_IO_WQ=y, CONFIG_USB_F_SERIAL=y and
+# CONFIG_USB_F_OBEX=y. Verified (via a standalone olddefconfig pass on the
+# unedited networked config, and again on a NET-off-only edit, both bypassing
+# CONFIG_NET entirely) that all four drop out regardless of CONFIG_NET — they
+# are pre-existing Kconfig drift/rot in the committed config, not part of the
+# networking closure, so they are deliberately excluded here.
+CONFIG_NET=y
+CONFIG_UNIX=y
+CONFIG_INET=y
+CONFIG_USB_CONFIGFS_NCM=y

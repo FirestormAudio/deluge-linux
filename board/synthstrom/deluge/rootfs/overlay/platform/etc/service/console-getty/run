@@ -1,0 +1,6 @@
+#!/bin/sh
+# Login shell on the USB CDC-ACM console. ttyGS0 (the built-in g_serial gadget)
+# appears asynchronously after USB enumeration — wait for it, or getty fails and
+# runsv respawns in a tight loop. BusyBox getty arg order is BAUD then TTY.
+while [ ! -c /dev/ttyGS0 ]; do /bin/busybox sleep 1; done
+exec /bin/busybox getty -L 115200 ttyGS0 vt100

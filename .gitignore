@@ -1,0 +1,25 @@
+# Buildroot (pinned + fetched by the top-level Makefile)
+/.buildroot/
+
+# Build output
+/out/
+
+# Per-checkout Buildroot source overrides (see local.mk.example)
+/local.mk
+
+# J-Link runtime logs (the harness tees server/RTT output here)
+/debug/jlink/.server.log
+/debug/jlink/.rtt.log
+/debug/jlink/uboot.bin
+
+# Editor / OS cruft
+*.swp
+.DS_Store
+
+# Python bytecode
+__pycache__/
+*.pyc
+
+# Local design notes and tool scratch, not published
+/.superpowers/
+/docs/superpowers/

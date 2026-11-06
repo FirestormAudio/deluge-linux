@@ -1,0 +1,9 @@
+config HVC_RTT
+	bool "SEGGER RTT console (Deluge / RZ/A1L bring-up)"
+	depends on ARM
+	select HVC_DRIVER
+	select SERIAL_CORE_CONSOLE
+	help
+	  Interactive console over a SEGGER RTT control block in on-chip SRAM,
+	  read/written by a J-Link probe (no UART needed).  Pairs with the RTT
+	  earlycon.  Use with "console=hvc0".

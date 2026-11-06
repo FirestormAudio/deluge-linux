@@ -1,0 +1,12 @@
+#!/bin/sh
+exec >/dev/kmsg 2>&1
+# Wait for the USB network interface before starting SSH.
+while [ ! -e /sys/class/net/usb0 ]; do /bin/busybox sleep 1; done
+# Host key persists on the writable SD; fall back to /run (tmpfs) if unavailable.
+KEYDIR=/sd/dropbear
+/bin/busybox mkdir -p "$KEYDIR" 2>/dev/null || KEYDIR=/run/dropbear
+/bin/busybox mkdir -p "$KEYDIR"
+KEY="$KEYDIR/dropbear_ed25519_host_key"
+[ -f "$KEY" ] || /usr/bin/dropbearkey -t ed25519 -f "$KEY" >/dev/kmsg 2>&1
+echo "deluge: starting dropbear on 0.0.0.0:22"
+exec /usr/sbin/dropbear -F -E -r "$KEY"

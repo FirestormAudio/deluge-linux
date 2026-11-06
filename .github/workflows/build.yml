@@ -1,0 +1,71 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  # Seconds, not hours: the packer/map tests run as their own job, in parallel
+  # with the multi-hour Buildroot builds below, so a broken packer shows up
+  # quickly. It does not gate or cancel the build job.
+  tools:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: sudo apt-get update && sudo apt-get install -y cpio
+      - run: python3 -m pip install pytest
+      - run: python3 -m pytest tests/ -v
+
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        profile: [base, platform]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # The cross-toolchain is a prebuilt tarball Buildroot downloads; these are
+      # only the host tools it needs to build everything else.
+      - name: Install Buildroot's host prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential bc cpio file git rsync unzip wget \
+                                  python3 libncurses-dev device-tree-compiler
+
+      # Upstream tarballs and git clones (kernel, U-Boot, toolchain sources).
+      # Keyed on the pins, so bumping a pin invalidates the cache.
+      - name: Cache Buildroot downloads
+        uses: actions/cache@v4
+        with:
+          path: .buildroot/dl
+          key: dl-${{ hashFiles('Makefile', 'configs/deluge_defconfig') }}
+          restore-keys: dl-
+
+      - name: Build ${{ matrix.profile }}
+        run: make ${{ matrix.profile }}
+
+      - name: Pack the app-loader ELF
+        run: make appelf
+
+      # The load addresses must match board/synthstrom/deluge/memory-map.json,
+      # which U-Boot's compiled-in bootcmd also depends on.
+      - name: Verify the ELF's segment layout
+        run: |
+          python3 tools/check-app-elf.py --map board/synthstrom/deluge/memory-map.json out/LINUX.ELF
+          readelf -l out/LINUX.ELF | grep -E '0x0c000000|0x0df00000|0x0e000000|0x0e800000'
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: deluge-linux-${{ matrix.profile }}
+          path: |
+            out/LINUX.ELF
+            out/zImage
+            out/u-boot.bin
+            out/r7s72102-deluge.dtb

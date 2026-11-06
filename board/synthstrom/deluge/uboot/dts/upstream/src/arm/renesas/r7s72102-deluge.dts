@@ -1,0 +1,68 @@
+// SPDX-License-Identifier: GPL-2.0
+/*
+ * Device Tree for the Synthstrom Audible Deluge
+ * SoC: Renesas RZ/A1L (R7S72102), ARM Cortex-A9
+ *
+ * The RZ/A1L uses the same peripheral set as the RZ/A1H (R7S72100)
+ * but with 3 MB on-chip SRAM instead of 10 MB.  On-chip SRAM is not
+ * exposed to Linux; the kernel runs entirely from the 64 MB SDRAM.
+ *
+ * Console: SCIF0 on P6_14 (RxD, mux 5) / P6_15 (TxD, mux 5).
+ * Physical access: MIDI DIN 5-pin connector (back panel).
+ *   DIN pin 2 = GND, pin 4 = RxD (→ adapter TX), pin 5 = TxD (→ adapter RX).
+ */
+
+/dts-v1/;
+#include "r7s72100.dtsi"
+#include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/pinctrl/r7s72100-pinctrl.h>
+
+/ {
+	model = "Synthstrom Audible Deluge";
+	compatible = "synthstrom,deluge", "renesas,r7s72100";
+
+	aliases {
+		serial0 = &scif0;
+	};
+
+	/*
+	 * No stdout-path: U-Boot falls back to the first available serial
+	 * device, which is the semihosting driver (output over JLink).
+	 * Linux uses the bootargs console= parameter independently.
+	 * To switch to physical UART, add: stdout-path = "serial0:115200n8";
+	 */
+	chosen {};
+
+	/*
+	 * 64 MB SDRAM on CS3.
+	 * Pre-initialised by the Deluge's preliminary bootloader.
+	 * U-Boot is loaded at 0x0C000000 and relocates itself to the top.
+	 */
+	memory@c000000 {
+		device_type = "memory";
+		reg = <0x0c000000 0x04000000>;
+	};
+};
+
+/* Crystal oscillator: 13.2256 MHz.
+ * PLL ×30 → CPU ~400 MHz; P1 = ×5 → 66.128 MHz (SCIF clock source). */
+&extal_clk {
+	clock-frequency = <13225600>;
+};
+
+&pinctrl {
+	/*
+	 * SCIF0: MIDI DIN connector (back panel)
+	 * P6_14 = RxD0 (mux 5), P6_15 = TxD0 (mux 5)
+	 */
+	scif0_pins: scif0 {
+		pinmux = <RZA1_PINMUX(6, 14, 5)>,	/* RxD0 */
+			 <RZA1_PINMUX(6, 15, 5)>;	/* TxD0 */
+	};
+};
+
+&scif0 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&scif0_pins>;
+	status = "okay";
+};

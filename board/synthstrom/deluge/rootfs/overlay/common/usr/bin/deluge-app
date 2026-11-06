@@ -1,0 +1,7 @@
+#!/bin/sh
+# STUB product app. The real musl-static Rust app on libdeluge replaces this
+# (downstream spec). It will open /dev/watchdog and pet it from the audio loop;
+# the stub deliberately does NOT arm the watchdog (it stays disarmed until the
+# real core exists). Here we just prove boot-to-app and stay alive.
+echo "deluge-app (STUB): base profile up — $(uname -srm)"
+while :; do /bin/busybox sleep 60; done

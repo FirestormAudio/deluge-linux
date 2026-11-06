@@ -1,0 +1,9 @@
+config LEDS_DELUGE
+	tristate "Synthstrom Deluge front-panel LEDs (via PIC)"
+	depends on LEDS_CLASS
+	depends on INPUT_DELUGE_PIC
+	depends on ARCH_R7S72100 || COMPILE_TEST
+	help
+	  36 indicator LEDs and two gold-knob 4-LED columns on the Synthstrom
+	  Deluge front panel, exposed as LED-class devices. Output is sent over
+	  the PIC32 (deluge-pic) on SCIF1.

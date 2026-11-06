@@ -1,0 +1,9 @@
+config DELUGE_SRAM
+	tristate "Synthstrom Deluge userspace on-chip SRAM region"
+	depends on ARCH_R7S72100 || COMPILE_TEST
+	help
+	  Exposes a fixed on-chip SRAM carveout as /dev/deluge-sram, mmap-able
+	  cached into userspace (the Spark synth) for hot DSP data such as
+	  wavetables and delay lines: on-chip, never evicted by SDRAM traffic,
+	  with a deterministic refill on a cache miss. A GET_INFO ioctl reports
+	  the region's physical base and size.

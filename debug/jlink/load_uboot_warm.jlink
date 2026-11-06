@@ -1,0 +1,55 @@
+// load_uboot_warm.jlink
+//
+// Load U-Boot into SDRAM while the Deluge's existing firmware is running.
+// The preliminary bootloader has already initialised CPG, BSC, SDRAM, and
+// GPIO, so we can skip all of that and just halt, load, and jump.
+//
+// Usage:
+//   JLinkExe -device R7S721020 -if JTAG -speed 4000 \
+//            -JLinkScriptFile ../rza1_debug_halt.JLinkScript \
+//            -CommandFile load_uboot_warm.jlink
+//
+// Or from JLink GDB server + GDB:
+//   (gdb) target remote :2331
+//   (gdb) monitor halt
+//   (gdb) restore uboot.bin binary 0x0C000000
+//   (gdb) set $pc = 0x0C000000
+//   (gdb) continue
+//
+// The -JLinkScriptFile argument is optional when using this command file;
+// it's only needed if the JLink tries to reset before connecting.
+
+// Halt the CPU (without asserting nRESET — that would run the ROM bootloader).
+// If already halted from a previous debug session, this is a no-op.
+h
+
+// Optional: verify SDRAM is alive by reading first word.
+// Should not be 0xFFFFFFFF (un-init) or 0xDEADBEEF.
+// mem32 0x0C000000 1
+
+// Load U-Boot binary into SDRAM at 0x0C000000.
+// Build in src/u-boot/:
+//   make ARCH=arm CROSS_COMPILE=arm-none-eabi- deluge_defconfig
+//   make ARCH=arm CROSS_COMPILE=arm-none-eabi- -j$(nproc)
+//   cp u-boot.bin ../../jlink/uboot.bin
+loadbin uboot.bin 0x0C000000
+
+// Set CPU registers to a clean boot state.
+// S-mode, IRQ/FIQ disabled, ARM mode.
+wreg CPSR 0x000000D3
+
+// Set VBAR to 0x0C000000 so ARM exception vectors point at U-Boot.
+// (This requires JLink firmware >= 6.x that supports CP15 register writes
+//  via wreg CP15_<n>; otherwise use a JLink script or GDB 'monitor cp15'.)
+//
+// Disable MMU, D-cache, I-cache in SCTLR before handing control to U-Boot
+// (U-Boot will re-enable them after setting up its own page tables).
+//
+// These CP15 writes must be done from GDB if your JLink doesn't support
+// 'wreg CP15' syntax; see the GDB equivalent commands above.
+
+// Set PC to U-Boot entry point (start of binary = reset vector table).
+SetPC 0x0C000000
+
+// Run.
+g

@@ -1,0 +1,81 @@
+#!/bin/sh
+# Assemble the USB gadget via configfs: ACM console (always) + UAC2 audio +
+# USB-MIDI 2.0 (with 1.0 fallback) + NCM ethernet (platform only, if
+# /etc/deluge-gadget.d/ncm exists). Run from /init before runsvdir so ttyGS0
+# (the console) exists before services start. Idempotent.
+CFG=/sys/kernel/config
+G="$CFG/usb_gadget/deluge"
+
+[ -d "$CFG/usb_gadget" ] || /bin/busybox mount -t configfs none "$CFG" 2>/dev/null
+
+# Already assembled + bound? Nothing to do.
+[ -f "$G/UDC" ] && [ -n "$(/bin/busybox cat "$G/UDC" 2>/dev/null)" ] && exit 0
+
+/bin/busybox mkdir -p "$G" || exit 1
+echo 0x1d6b > "$G/idVendor"        # Linux Foundation
+echo 0x0104 > "$G/idProduct"       # Multifunction Composite Gadget
+echo 0x0100 > "$G/bcdDevice"
+echo 0x0200 > "$G/bcdUSB"
+/bin/busybox mkdir -p "$G/strings/0x409"
+echo "Synthstrom Audible" > "$G/strings/0x409/manufacturer"
+echo "Deluge"             > "$G/strings/0x409/product"
+echo "deluge0001"         > "$G/strings/0x409/serialnumber"
+
+/bin/busybox mkdir -p "$G/configs/c.1/strings/0x409"
+echo "Deluge composite" > "$G/configs/c.1/strings/0x409/configuration"
+echo 250 > "$G/configs/c.1/MaxPower"
+
+# ACM console (always)
+/bin/busybox mkdir -p "$G/functions/acm.0"
+/bin/busybox ln -sf "$G/functions/acm.0" "$G/configs/c.1/"
+
+# UAC2 audio interface: stereo out + stereo in, 44.1kHz only, 16-bit. chmask 3 = FL+FR.
+# NOTE: 44.1kHz-only is deliberate — it matches the internal codec (DELUGE_SR),
+# so the host can never negotiate a rate the engine would have to sample-rate
+# convert; bridging the two streams only has to reconcile drift between the two
+# 44.1k clocks, never a fixed ratio. ssize=2 (16-bit) + stereo capture are a
+# conservative choice; 24-bit (ssize=3) / multichannel are not enabled.
+/bin/busybox mkdir -p "$G/functions/uac2.0"
+echo 3     > "$G/functions/uac2.0/p_chmask"   # playback (host->device) stereo
+echo 44100 > "$G/functions/uac2.0/p_srate"
+echo 2     > "$G/functions/uac2.0/p_ssize"    # 16-bit
+echo 3     > "$G/functions/uac2.0/c_chmask"   # capture (device->host) stereo
+echo 44100 > "$G/functions/uac2.0/c_srate"
+echo 2     > "$G/functions/uac2.0/c_ssize"
+# Disable host-side volume/mute controls. They add a UAC2 feature-unit + a
+# status INTERRUPT endpoint, but the RZ/A1 usbhs has only 3 interrupt pipes —
+# already claimed by CDC-ACM notify + CDC-NCM notify + f_midi2's MIDI-2.0 UMP
+# interrupt endpoint. With volume/mute on, f_midi2's interrupt endpoint loses
+# ("can't get pipe (INT)") and MIDI data never flows. Dropping these frees the
+# pipe so MIDI works; the engine manages its own levels.
+echo 0     > "$G/functions/uac2.0/p_volume_present"
+echo 0     > "$G/functions/uac2.0/p_mute_present"
+echo 0     > "$G/functions/uac2.0/c_volume_present"
+echo 0     > "$G/functions/uac2.0/c_mute_present"
+/bin/busybox ln -sf "$G/functions/uac2.0" "$G/configs/c.1/"
+
+# USB-MIDI 2.0 (UMP) with mandatory MIDI 1.0 fallback — 1 bidirectional cable/group.
+# midi2.0 auto-creates ep.0 and ep.0/block.0; we configure them.
+/bin/busybox mkdir -p "$G/functions/midi2.0"
+echo "Deluge" > "$G/functions/midi2.0/iface_name"          2>/dev/null || true
+echo 3 > "$G/functions/midi2.0/ep.0/protocol_caps"          # 1=1.0, 2=2.0, 3=both
+echo 2 > "$G/functions/midi2.0/ep.0/protocol"               # default to MIDI 2.0
+echo "Deluge"     > "$G/functions/midi2.0/ep.0/ep_name"      2>/dev/null || true
+echo "Synthstrom" > "$G/functions/midi2.0/ep.0/manufacturer" 2>/dev/null || true
+echo 3 > "$G/functions/midi2.0/ep.0/block.0/direction"      # 1=in, 2=out, 3=bidirectional
+echo 0 > "$G/functions/midi2.0/ep.0/block.0/first_group"    # UMP group 0
+echo 1 > "$G/functions/midi2.0/ep.0/block.0/num_groups"     # 1 group (1 cable)
+echo "Deluge" > "$G/functions/midi2.0/ep.0/block.0/name"    2>/dev/null || true
+/bin/busybox ln -sf "$G/functions/midi2.0" "$G/configs/c.1/"
+
+# NCM ethernet (platform marker)
+if [ -e /etc/deluge-gadget.d/ncm ]; then
+	/bin/busybox mkdir -p "$G/functions/ncm.0"
+	echo 02:22:82:ff:ff:11 > "$G/functions/ncm.0/dev_addr"
+	echo 02:22:82:ff:ff:22 > "$G/functions/ncm.0/host_addr"
+	/bin/busybox ln -sf "$G/functions/ncm.0" "$G/configs/c.1/"
+fi
+
+# Bind to the first available UDC.
+udc=$(/bin/busybox ls /sys/class/udc 2>/dev/null | /bin/busybox head -1)
+[ -n "$udc" ] && echo "$udc" > "$G/UDC"

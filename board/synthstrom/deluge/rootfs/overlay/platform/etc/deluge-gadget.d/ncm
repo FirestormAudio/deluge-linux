@@ -1,0 +1,2 @@
+# Presence of this file tells /usr/sbin/deluge-gadget to add the CDC-NCM
+# ethernet function (usb0) to the composite. Platform profile only.

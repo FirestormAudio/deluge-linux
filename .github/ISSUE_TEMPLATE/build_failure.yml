@@ -1,0 +1,54 @@
+name: Build failure
+description: The build breaks on your machine
+labels: [build]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Most build failures are a missing host prerequisite or a stale
+        `.buildroot/`. Check the prerequisites in CONTRIBUTING.md and try
+        `make distclean` first — `.buildroot/` is throwaway by design.
+
+  - type: input
+    id: target
+    attributes:
+      label: Target
+      placeholder: make base / make platform / make bundle / make sdk
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Release tag, or `git rev-parse --short HEAD`.
+    validations:
+      required: true
+
+  - type: input
+    id: host
+    attributes:
+      label: Host OS
+      placeholder: Ubuntu 24.04 / Arch / Fedora 41 / macOS 15
+    validations:
+      required: true
+
+  - type: textarea
+    id: log
+    attributes:
+      label: The failure
+      description: |
+        The error and enough surrounding lines to show which package was
+        building. Buildroot's own log tail is usually the useful part.
+      render: text
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: tried
+    attributes:
+      label: Already tried
+      options:
+        - label: Installed every host prerequisite listed in CONTRIBUTING.md
+        - label: "`make distclean` and a fresh build"
+        - label: "`python3 -m pytest tests/ -v` passes"

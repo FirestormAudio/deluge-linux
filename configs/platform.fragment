@@ -1,0 +1,15 @@
+# Platform profile: hackable — common + platform overlays. Console getty +
+# USB NCM networking (usb0) + dropbear SSH. It boots the same
+# /usr/bin/deluge-app slot as base (from the common overlay); the platform
+# overlay only adds the shell/network services on top.
+BR2_ROOTFS_OVERLAY="$(BR2_EXTERNAL_DELUGE_PATH)/board/synthstrom/deluge/rootfs/overlay/common $(BR2_EXTERNAL_DELUGE_PATH)/board/synthstrom/deluge/rootfs/overlay/platform"
+BR2_PACKAGE_DROPBEAR=y
+
+# ALSA command-line tools for debugging on the hackable image (aplay/arecord
+# drive the gadget streams during USB clock measurement). alsa-lib itself lives
+# in the shared defconfig — the SDK links it in every profile.
+BR2_PACKAGE_ALSA_UTILS=y
+BR2_PACKAGE_ALSA_UTILS_APLAY=y
+
+# Networkless base kernel + this fragment = platform's full-stack kernel.
+BR2_LINUX_KERNEL_CONFIG_FRAGMENT_FILES="$(BR2_EXTERNAL_DELUGE_PATH)/board/synthstrom/deluge/kernel/kconfig/networking.fragment"

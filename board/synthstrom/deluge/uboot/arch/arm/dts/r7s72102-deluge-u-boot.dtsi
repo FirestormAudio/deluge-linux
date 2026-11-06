@@ -1,0 +1,50 @@
+// SPDX-License-Identifier: GPL-2.0
+/*
+ * U-Boot extras for the Synthstrom Audible Deluge.
+ * Marks nodes needed during SPL/pre-relocation with bootph-all.
+ *
+ * Console: semihosting (output over JLink debug connection, no UART needed).
+ * stdout-path is intentionally absent from the chosen node so U-Boot falls
+ * back to the first available serial device — the semihosting driver, which
+ * is registered via U_BOOT_DRVINFO and does not require a DT node.
+ *
+ * To switch to the physical SCIF0 UART (MIDI DIN connector):
+ *   1. In deluge_defconfig: flip SEMIHOSTING_SERIAL↔SCIF_CONSOLE,
+ *      remove DEBUG_UART_SEMIHOSTING, add DEBUG_UART_SCIF.
+ *   2. In r7s72102-deluge.dts chosen: add stdout-path = "serial0:115200n8".
+ *   3. Uncomment the scif0 block below and set clock = <66128000>.
+ */
+
+/ {
+	soc {
+		bootph-all;
+	};
+};
+
+&bsc {
+	bootph-all;
+};
+
+&ostm0 {
+	bootph-all;
+	status = "okay";	/* U-Boot tick timer (needed by bootz / get_timer) */
+};
+
+&pinctrl {
+	bootph-all;
+};
+
+/*
+ * scif0 stays in the board DTS (Linux needs it), but we don't configure
+ * the clock workaround here because it is not the U-Boot console.
+ * Uncomment below if switching back to physical UART console:
+ *
+ * &scif0 {
+ *     bootph-all;
+ *     clock = <66128000>;
+ * };
+ *
+ * &scif0_pins {
+ *     bootph-all;
+ * };
+ */

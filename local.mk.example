@@ -1,0 +1,9 @@
+# Copy to local.mk (gitignored) to build packages from local checkouts instead
+# of their pinned sources. configs/deluge_defconfig points Buildroot's
+# BR2_PACKAGE_OVERRIDE_FILE here. One <PKG>_OVERRIDE_SRCDIR line per package;
+# see "Using Buildroot during development" in the Buildroot manual.
+#
+# The same variables also work one-off on the command line:
+#   make base LIBDELUGE_OVERRIDE_SRCDIR=/path/to/libdeluge
+
+# LIBDELUGE_OVERRIDE_SRCDIR = /path/to/libdeluge

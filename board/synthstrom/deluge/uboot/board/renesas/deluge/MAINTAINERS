@@ -1,0 +1,6 @@
+DELUGE BOARD
+M:	Synthstrom Audible developers
+S:	Maintained
+F:	board/renesas/deluge/
+F:	include/configs/deluge.h
+F:	configs/deluge_defconfig

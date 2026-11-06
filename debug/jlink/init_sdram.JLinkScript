@@ -1,0 +1,160 @@
+/*
+ * init_sdram.JLinkScript
+ *
+ * Full cold-start initialisation for the Deluge (Renesas RZ/A1L / R7S721020).
+ * Replaces the default JLink ResetTarget with a sequence that:
+ *   1. Halts the CPU without asserting nRESET (avoids running ROM bootloader).
+ *   2. Enables data-retention RAM writes (SYSCR3).
+ *   3. Initialises the CPG for PLL×30, CPU=400 MHz, P0=66.128 MHz.
+ *   4. Configures GPIO pin-mux for SDRAM (P2[0:6], P3[0:14], P5[0:15])
+ *      and for the SCIF0 console (P6[14:15], MIDI DIN connector).
+ *   5. Initialises the BSC for 64 MB SDRAM on CS3 (Micron MT48LC16M16A2P-75).
+ *   6. Initialises BSC for SPI NOR flash on CS0/CS1 (parallel-bus timing).
+ *
+ * After this script has run, issue:
+ *   loadbin uboot.bin 0x0C000000
+ *   SetPC 0x0C000000
+ *   g
+ *
+ * Register values are derived from the bare-metal Deluge BSP's clock
+ * (CPG, STBCR), SDRAM/bus-state-controller (BSC, CS0/CS1 timing) and GPIO
+ * setup, cross-checked against the RZ/A1L hardware manual.
+ *
+ * GPIO register map (RZ/A1L HW Manual §21):
+ *   PMCn  (mux enable, 0=GPIO, 1=periph): 0xFCFE_3400 + port*4   (0-based port)
+ *   PFCn  (mux bit 0):                   0xFCFE_3504 + (port-1)*4
+ *   PFCEn (mux bit 1):                   0xFCFE_3604 + (port-1)*4
+ *   PFCAEn(mux bit 2):                   0xFCFE_3A04 + (port-1)*4
+ *   PIPCn (periph ctrl, 1=periph):        0xFCFE_7204 + (port-1)*4
+ *
+ * Mux function encoding: {PFCAE, PFCE, PFC} = mux - 1
+ *   mux=1: {0,0,0}   mux=5: {1,0,0}
+ *   mux=2: {0,0,1}   mux=6: {1,0,1}
+ *   mux=3: {0,1,0}   mux=7: {1,1,0}
+ *   mux=4: {0,1,1}
+ */
+
+int ResetTarget(void) {
+    int timeout;
+    int i;
+
+    JLINK_SYS_Report("Deluge: custom ResetTarget -- cold init");
+
+    /* ------------------------------------------------------------------ */
+    /* 1. Halt without reset                                                */
+    /* ------------------------------------------------------------------ */
+    JLINK_TARGET_Halt();
+    timeout = 500;
+    while (JLINK_TARGET_IsHalted() == 0) {
+        JLINK_SYS_Sleep(1);
+        timeout = timeout - 1;
+        if (timeout == 0) {
+            JLINK_SYS_Report("Deluge: ERROR - CPU did not halt");
+            return -1;
+        }
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* 2. Disable WDT before doing anything else                           */
+    /* WDT requires magic-byte-prefixed 16-bit writes.                    */
+    /* WTCSR @ 0xFCFE0002: 0xA5 prefix | 0x18 = stop                     */
+    /* WTCNT @ 0xFCFE0000: 0x5A prefix | 0x00 = clear count              */
+    /* ------------------------------------------------------------------ */
+    JLINK_MEM_WriteU16(0xFCFE0002, 0xA518);   /* WTCSR: stop WDT */
+    JLINK_MEM_WriteU16(0xFCFE0000, 0x5A00);   /* WTCNT: clear count */
+    JLINK_SYS_Report("Deluge: WDT disabled");
+
+    /* ------------------------------------------------------------------ */
+    /* 3. Enable data-retention RAM writes                                  */
+    /* CPG.SYSCR3 @ 0xFCFE0408 — bits[3:0] unlock the four 32KB banks.    */
+    /* ------------------------------------------------------------------ */
+    JLINK_MEM_WriteU8(0xFCFE0408, 0x0F);
+    JLINK_SYS_Report("Deluge: SYSCR3 enabled");
+
+    /* ------------------------------------------------------------------ */
+    /* 3. CPG: power control + PLL                                          */
+    /*                                                                      */
+    /* Power control @ 0x3FFFFF80 = 0x00000001                             */
+    /* FRQCR  @ 0xFCFE0010 = 0x1035 — PLL×30, I:G:B:P1:P0 = 30:20:10:5:? */
+    /* FRQCR2 @ 0xFCFE0014 = 0x0001 — CKIO = P1, low during standby       */
+    /* ------------------------------------------------------------------ */
+    JLINK_MEM_WriteU32(0x3FFFFF80, 0x00000001);
+    /* Small delay for PLL lock — JLink has no sleep in non-hook context,  */
+    /* but the MEM reads below act as implicit delays.                     */
+    JLINK_MEM_ReadU32(0x3FFFFF80);   /* dummy read for ordering */
+    JLINK_MEM_WriteU16(0xFCFE0010, 0x1035);
+    JLINK_MEM_ReadU16(0xFCFE0010);
+    JLINK_MEM_WriteU16(0xFCFE0014, 0x0001);
+    JLINK_MEM_ReadU16(0xFCFE0014);
+    JLINK_SYS_Report("Deluge: CPG PLL configured");
+
+    /* ------------------------------------------------------------------ */
+    /* 4. GPIO pin-mux                                                      */
+    /*                                                                      */
+    /* All SDRAM pins use mux=1: {PFCAE=0, PFCE=0, PFC=0}, PMC=1, PIPC=1  */
+    /* SCIF0 pins use mux=5:   {PFCAE=1, PFCE=0, PFC=0}, PMC=1, PIPC=1   */
+    /* ------------------------------------------------------------------ */
+
+    /* -- P2[0:6]: SDRAM control (CS3#, RAS#, CAS#, CKE, WE0#, WE1#, RD/WR) -- */
+    /* mux=1: PFC/PFCE/PFCAE all 0 → nothing to set in those registers     */
+    /* PMC2  @ 0xFCFE3408 |= 0x007F */
+    /* PIPC2 @ 0xFCFE7208 |= 0x007F */
+    JLINK_MEM_WriteU16(0xFCFE3408, 0x007F);   /* PMC2:  bits 0-6 = periph  */
+    JLINK_MEM_WriteU16(0xFCFE7208, 0x007F);   /* PIPC2: bits 0-6 = periph  */
+
+    /* -- P3[0:14]: SDRAM address A0-A14 -- */
+    JLINK_MEM_WriteU16(0xFCFE340C, 0x7FFF);   /* PMC3:  bits 0-14          */
+    JLINK_MEM_WriteU16(0xFCFE720C, 0x7FFF);   /* PIPC3: bits 0-14          */
+
+    /* -- P5[0:15]: SDRAM data D0-D15 -- */
+    JLINK_MEM_WriteU16(0xFCFE3414, 0xFFFF);   /* PMC5:  all 16 bits        */
+    JLINK_MEM_WriteU16(0xFCFE7214, 0xFFFF);   /* PIPC5: all 16 bits        */
+
+    /* -- P6[14:15]: SCIF0 RxD0/TxD0 (MIDI DIN, mux=5) -- */
+    /* mux=5: PFCAE=1, PFCE=0, PFC=0                                       */
+    /* PFCAE6 @ 0xFCFE3A18 |= 0xC000 */
+    /* PMC6   @ 0xFCFE3418 |= 0xC000 */
+    /* PIPC6  @ 0xFCFE7218 |= 0xC000 */
+    JLINK_MEM_WriteU16(0xFCFE3A18, 0xC000);   /* PFCAE6: bits 14-15 = 1    */
+    JLINK_MEM_WriteU16(0xFCFE3618, 0x0000);   /* PFCE6:  bits 14-15 = 0    */
+    JLINK_MEM_WriteU16(0xFCFE3518, 0x0000);   /* PFC6:   bits 14-15 = 0    */
+    JLINK_MEM_WriteU16(0xFCFE3418, 0xC000);   /* PMC6:   bits 14-15        */
+    JLINK_MEM_WriteU16(0xFCFE7218, 0xC000);   /* PIPC6:  bits 14-15        */
+    JLINK_SYS_Report("Deluge: GPIO pin-mux done");
+
+    /* ------------------------------------------------------------------ */
+    /* 5. BSC: CS0/CS1 for SPI NOR flash (parallel bus timing)             */
+    /* From rza1l-hal/src/bsc.rs: BCR=0x10000C00, WCR=0x00000B40          */
+    /* ------------------------------------------------------------------ */
+    JLINK_MEM_WriteU32(0x3FFFC004, 0x10000C00);  /* CS0BCR */
+    JLINK_MEM_WriteU32(0x3FFFC008, 0x10000C00);  /* CS1BCR */
+    JLINK_MEM_WriteU32(0x3FFFC028, 0x00000B40);  /* CS0WCR */
+    JLINK_MEM_WriteU32(0x3FFFC02C, 0x00000B40);  /* CS1WCR */
+
+    /* ------------------------------------------------------------------ */
+    /* 6. BSC: CS2/CS3 for 64MB SDRAM (Micron MT48LC16M16A2P-75)           */
+    /* From deluge-bsp/src/sdram.rs                                        */
+    /* ------------------------------------------------------------------ */
+    JLINK_MEM_WriteU32(0x3FFFC00C, 0x00004C00);  /* CS2BCR: SDRAM, 16-bit  */
+    JLINK_MEM_WriteU32(0x3FFFC010, 0x00004C00);  /* CS3BCR: SDRAM, 16-bit  */
+    JLINK_MEM_WriteU32(0x3FFFC034, 0x00000088);  /* CS3WCR: tRCD/CAS/tRC   */
+    JLINK_MEM_WriteU32(0x3FFFC04C, 0x00110912);  /* SDCR: 13row/10col/64MB */
+    JLINK_MEM_WriteU32(0x3FFFC058, 0xA55A0080);  /* RTCOR: refresh counter */
+    JLINK_MEM_WriteU32(0x3FFFC050, 0xA55A0008);  /* RTCSR: start init seq  */
+
+    /* Wait for SDRAM init sequence (PRECHARGE ALL + 2× AUTO REFRESH).    */
+    /* The BSC state machine manages the JEDEC power-up sequence; the      */
+    /* dummy reads below provide the necessary settling time.              */
+    for (i = 0; i < 100; i++) {
+        JLINK_MEM_ReadU32(0x3FFFC050);
+    }
+
+    /* Mode Register Set (MRS): burst=1, seq, CAS=2.                      */
+    /* A 16-bit write to offset 0x040 from CS base triggers the MRS cmd.  */
+    JLINK_MEM_WriteU16(0x3FFFD040, 0x0000);  /* CS2 MRS */
+    JLINK_MEM_WriteU16(0x3FFFE040, 0x0000);  /* CS3 MRS */
+    JLINK_SYS_Report("Deluge: SDRAM ready at 0x0C000000 (64MB)");
+
+    JLINK_SYS_Report("Deluge: custom ResetTarget done -- ready for loadbin");
+    return 0;
+}

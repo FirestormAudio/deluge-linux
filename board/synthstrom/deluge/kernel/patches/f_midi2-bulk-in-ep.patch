@@ -1,0 +1,18 @@
+--- a/drivers/usb/gadget/function/f_midi2.c
++++ b/drivers/usb/gadget/function/f_midi2.c
+@@ -1898,9 +1898,12 @@
+ 	desc->bLength = USB_DT_ENDPOINT_SIZE;
+ 	desc->bDescriptorType = USB_DT_ENDPOINT;
+ 	desc->bEndpointAddress = USB_DIR_IN;
+-	desc->bmAttributes = USB_ENDPOINT_XFER_INT;
+-	desc->wMaxPacketSize = cpu_to_le16(EP_MAX_PACKET_INT);
+-	desc->bInterval = 1;
++	/* Deluge: BULK, not INTERRUPT. The RZ/A1 renesas_usbhs UDC can't service an
++	   interrupt IN pipe here (irq_ready run_error, -EBUSY), which silently
++	   stalls process_ump_transmit so MIDI-2.0 data never leaves the device.
++	   Bulk works on this UDC (as it does for the MIDI-2.0 OUT and both MIDI-1.0
++	   endpoints); wMaxPacketSize is assigned per speed in f_midi2_set_speed. */
++	desc->bmAttributes = USB_ENDPOINT_XFER_BULK;
+ 
+ 	fill_midi2_class_desc(ep, &midi2_midi2_ep_in_class_desc[index]);
+ 

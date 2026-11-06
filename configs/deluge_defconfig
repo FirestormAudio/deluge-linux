@@ -1,0 +1,136 @@
+# Deluge userspace — shared base (musl, BusyBox + runit applets). Profile
+# fragments (base.fragment / platform.fragment) are merged on top by the
+# top-level Makefile.
+BR2_arm=y
+BR2_cortex_a9=y
+# Cortex-A9's FPU is optional; ENABLE_* promote it so EABIhf + NEON stick
+# (matches the kernel's VFP/NEON). Without these, Buildroot falls back to soft float.
+BR2_ARM_ENABLE_NEON=y
+BR2_ARM_ENABLE_VFP=y
+BR2_ARM_FPU_NEON=y
+BR2_ARM_EABIHF=y
+
+# Prebuilt external musl toolchain (Bootlin) — skips building GCC from source.
+# armv7-eabihf musl bleeding-edge: GCC 15, libstdc++, threads/NPTL, SSP; kernel
+# headers 5.15. The 5.15 headers are required by src/cv.c's GPIO v2 uAPI (the
+# GPIO_V2_* ioctls landed in Linux 5.10); the old "stable" toolchain shipped 5.4
+# headers and could not compile it. Still forward-compatible with the 7.1 target
+# kernel. Buildroot wraps it as arm-buildroot-linux-musleabihf-, so the triple
+# the Rust app / SDK use is unchanged. Revert to the 3 BR2_TOOLCHAIN_BUILDROOT*
+# lines to build the toolchain from source instead.
+BR2_TOOLCHAIN_EXTERNAL=y
+BR2_TOOLCHAIN_EXTERNAL_BOOTLIN=y
+BR2_TOOLCHAIN_EXTERNAL_BOOTLIN_ARMV7_EABIHF_MUSL_BLEEDING_EDGE=y
+
+# Init: none from Buildroot — /init (base overlay) is PID 1 and execs runsvdir.
+BR2_INIT_NONE=y
+BR2_ROOTFS_DEVICE_CREATION_DYNAMIC_DEVTMPFS=y
+BR2_TARGET_GENERIC_HOSTNAME="deluge"
+BR2_TARGET_GENERIC_ISSUE="Synthstrom Deluge - Linux"
+BR2_TARGET_GENERIC_ROOT_PASSWD="deluge"
+
+# Base userland: BusyBox with runit applets (runsv/runsvdir/sv) enabled via the
+# fragment. runit is NOT a Buildroot package; its applets ship inside BusyBox.
+BR2_PACKAGE_BUSYBOX=y
+BR2_PACKAGE_BUSYBOX_CONFIG_FRAGMENT_FILES="$(BR2_EXTERNAL_DELUGE_PATH)/board/synthstrom/deluge/rootfs/busybox.config"
+
+# ALSA userspace. In the SHARED defconfig, not a profile fragment: libdeluge
+# links libasound, so every profile's sysroot must carry it or the SDK cannot
+# cross-compile at all. RAWMIDI is needed for the SDK's rawmidi opens
+# (deluge_midi / deluge_usb_midi).
+#
+# This also puts /usr/share/alsa/ in every rootfs, which a statically-linked app
+# still needs: alsa-lib loads its config tree on snd_pcm_open even for a plain
+# "hw:CARD=Deluge" (src/audio.c, src/midi.c in the SDK).
+BR2_PACKAGE_ALSA_LIB=y
+BR2_PACKAGE_ALSA_LIB_PCM=y
+BR2_PACKAGE_ALSA_LIB_RAWMIDI=y
+
+# Apps are linked statically (they run from the SD card and must not depend on
+# any particular image's rootfs), so the sysroot needs the static libraries —
+# while the rootfs itself keeps its shared ones. BR2_STATIC_LIBS would force
+# static everywhere and is NOT what we want.
+BR2_SHARED_STATIC_LIBS=y
+
+# Emit the relocatable cross toolchain + sysroot (`make sdk`). This is what the
+# SDK's consuming apps compile against; it ships in the base bundle.
+BR2_TARGET_SDK=y
+
+# alsa-lib can't build shared+static together, but the rootfs needs libasound.so
+# and the SDK's fully-static apps need libasound.a. This external package builds
+# a second, static-only alsa and stages just libasound.a into the sysroot.
+BR2_PACKAGE_DELUGE_ALSA_STATIC=y
+BR2_PACKAGE_DELUGE_SPLASH=y
+BR2_PACKAGE_LIBDELUGE=y
+
+# Shared rootfs overlay (/init + mounts + service dirs). Applied to every
+# profile; the profile fragments append their own layer on top.
+BR2_ROOTFS_OVERLAY="$(BR2_EXTERNAL_DELUGE_PATH)/board/synthstrom/deluge/rootfs/overlay/common"
+
+# Rootfs: a standalone, uncompressed cpio — NOT embedded in the kernel.
+# BR2_TARGET_ROOTFS_INITRAMFS is deliberately unset: it would make Buildroot
+# force CONFIG_INITRAMFS_SOURCE at its own rootfs.cpio, welding the rootfs into
+# vmlinux and making every app change a kernel relink. Instead the cpio is a
+# separate artifact that the app-loader ELF carries as its own PT_LOAD segment,
+# so one prebuilt zImage serves every app. Uncompressed: the initramfs is
+# unpacked on a 400 MHz Cortex-A9, where decompression costs more than the SD
+# read it saves.
+BR2_TARGET_ROOTFS_CPIO=y
+BR2_TARGET_ROOTFS_CPIO_NONE=y
+
+# Pre-devtmpfs device nodes (/dev/console, /dev/null, ...). /init cannot mount
+# devtmpfs without /dev/null already existing — see the table's header.
+BR2_ROOTFS_DEVICE_TABLE="system/device_table.txt $(BR2_EXTERNAL_DELUGE_PATH)/board/synthstrom/deluge/rootfs/device_table.txt"
+
+# Read <pkg>_OVERRIDE_SRCDIR from local.mk at the root of THIS tree (gitignored;
+# see local.mk.example). Buildroot's default looks inside its own source dir,
+# which is throwaway here.
+BR2_PACKAGE_OVERRIDE_FILE="$(BR2_EXTERNAL_DELUGE_PATH)/local.mk"
+
+# --- Kernel: mainline 7.1. The deluge-* drivers, DTS, Kconfig stanzas and the
+# --- mainline patches are stamped in by LINUX_PRE_PATCH_HOOKS (external.mk);
+# --- deluge.config is the authoritative config. Snapshot changes back with
+# --- `make linux-update-defconfig` — never edit the tree under .buildroot/.
+BR2_LINUX_KERNEL=y
+BR2_LINUX_KERNEL_CUSTOM_VERSION=y
+BR2_LINUX_KERNEL_CUSTOM_VERSION_VALUE="7.1"
+
+# Userspace headers come from the kernel we build (7.1), so they can never drift
+# from it. Buildroot's headers list stops at 7.0, so declare the series as
+# "7.0.x or later" — that marks them as the newest Buildroot knows about, which
+# relaxes its version check from exact-match to >=, and 7.1 satisfies it. Bump to
+# BR2_PACKAGE_HOST_LINUX_HEADERS_CUSTOM_7_1 when the Buildroot pin gains it.
+BR2_PACKAGE_HOST_LINUX_HEADERS_CUSTOM_7_0=y
+BR2_LINUX_KERNEL_USE_CUSTOM_CONFIG=y
+BR2_LINUX_KERNEL_CUSTOM_CONFIG_FILE="$(BR2_EXTERNAL_DELUGE_PATH)/board/synthstrom/deluge/kernel/deluge.config"
+BR2_LINUX_KERNEL_ZIMAGE=y
+BR2_LINUX_KERNEL_DTS_SUPPORT=y
+BR2_LINUX_KERNEL_INTREE_DTS_NAME="renesas/r7s72102-deluge"
+
+# Kernel self-decompressor: LZ4. Buildroot FORCES CONFIG_KERNEL_* from this
+# symbol (linux/linux.mk), overriding whatever deluge.config says — leave it unset
+# and it silently defaults to GZIP, which yields a smaller zImage but is far
+# slower to decompress on a 400 MHz Cortex-A9. Also pulls in host-lz4.
+BR2_LINUX_KERNEL_LZ4=y
+
+# --- U-Boot: pinned upstream. The Deluge board (SDRAM init, RTT console,
+# --- deluge_defconfig) is stamped in by UBOOT_PRE_PATCH_HOOKS (external.mk).
+# --- Built with Buildroot's target toolchain — no bare-metal arm-none-eabi-.
+# --- FORMAT_ELF emits images/u-boot (the ELF the JTAG flow and the app-loader
+# --- packer both want); FORMAT_BIN emits images/u-boot.bin.
+BR2_TARGET_UBOOT=y
+BR2_TARGET_UBOOT_BUILD_SYSTEM_KCONFIG=y
+BR2_TARGET_UBOOT_CUSTOM_GIT=y
+BR2_TARGET_UBOOT_CUSTOM_REPO_URL="https://source.denx.de/u-boot/u-boot.git"
+# v2026.07 release tag == commit ece349ade2973e220f524ce59e59711cc919263f
+BR2_TARGET_UBOOT_CUSTOM_REPO_VERSION="v2026.07"
+BR2_TARGET_UBOOT_USE_DEFCONFIG=y
+BR2_TARGET_UBOOT_BOARD_DEFCONFIG="deluge"
+BR2_TARGET_UBOOT_FORMAT_BIN=y
+BR2_TARGET_UBOOT_FORMAT_ELF=y
+
+# The board is device-tree driven, so U-Boot needs dtc. Let Buildroot supply
+# host-dtc and pass DTC= in; otherwise U-Boot compiles its own dtc, which links
+# against the host's libyaml and fails on any machine that lacks libyaml-dev
+# (including CI runners).
+BR2_TARGET_UBOOT_NEEDS_DTC=y

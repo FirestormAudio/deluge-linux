@@ -1,0 +1,76 @@
+--- a/drivers/usb/gadget/function/f_uac2.c
++++ b/drivers/usb/gadget/function/f_uac2.c
+@@ -59,6 +59,16 @@
+ 				&& ((_opts)->c_mute_present \
+ 				|| (_opts)->c_volume_present))
+ #define EPOUT_FBACK_IN_EN(_opts) ((_opts)->c_sync == USB_ENDPOINT_SYNC_ASYNC)
++/*
++ * Implicit feedback (out-of-tree, Deluge): when the function has BOTH async
++ * playback (OUT) and capture (IN), use the capture IN endpoint as the implicit
++ * feedback source instead of a dedicated feedback IN endpoint. This drops one
++ * ISO endpoint, so async full-duplex fits UDCs with few ISO pipes (RZ/A1
++ * usbhsc has only 2). Mirrors the Deluge firmware UAC2 (bSynchAddress=capture).
++ */
++#define IMPLICIT_FBACK_EN(_opts) \
++	(EPOUT_EN(_opts) && EPIN_EN(_opts) && \
++	 (_opts)->c_sync == USB_ENDPOINT_SYNC_ASYNC)
+ 
+ struct f_uac2 {
+ 	struct g_audio g_audio;
+@@ -868,7 +878,7 @@
+ 
+ 		headers[i++] = USBDHDR(&as_iso_out_desc);
+ 
+-		if (EPOUT_FBACK_IN_EN(opts)) {
++		if (EPOUT_FBACK_IN_EN(opts) && !IMPLICIT_FBACK_EN(opts)) {
+ 			headers[i++] = USBDHDR(epin_fback_desc);
+ 			if (epin_fback_desc_comp)
+ 				headers[i++] = USBDHDR(epin_fback_desc_comp);
+@@ -1162,7 +1172,10 @@
+ 			  USB_ENDPOINT_XFER_ISOC | USB_ENDPOINT_SYNC_ASYNC;
+ 			ss_epout_desc.bmAttributes =
+ 			  USB_ENDPOINT_XFER_ISOC | USB_ENDPOINT_SYNC_ASYNC;
+-			std_as_out_if1_desc.bNumEndpoints++;
++			/* implicit feedback uses the capture IN ep, not a
++			 * dedicated one, so the OUT alt keeps a single endpoint */
++			if (!IMPLICIT_FBACK_EN(uac2_opts))
++				std_as_out_if1_desc.bNumEndpoints++;
+ 		} else {
+ 			fs_epout_desc.bmAttributes =
+ 			  USB_ENDPOINT_XFER_ISOC | USB_ENDPOINT_SYNC_ADAPTIVE;
+@@ -1252,7 +1265,8 @@
+ 			ret = -ENODEV;
+ 			goto err_free_fu;
+ 		}
+-		if (EPOUT_FBACK_IN_EN(uac2_opts)) {
++		if (EPOUT_FBACK_IN_EN(uac2_opts) &&
++		    !IMPLICIT_FBACK_EN(uac2_opts)) {
+ 			agdev->in_ep_fback = usb_ep_autoconfig(gadget,
+ 						       &fs_epin_fback_desc);
+ 			if (!agdev->in_ep_fback) {
+@@ -1298,6 +1312,25 @@
+ 	ss_epin_desc.bEndpointAddress = fs_epin_desc.bEndpointAddress;
+ 	ss_ep_int_desc.bEndpointAddress = fs_ep_int_desc.bEndpointAddress;
+ 
++	if (IMPLICIT_FBACK_EN(uac2_opts)) {
++		/*
++		 * No dedicated feedback endpoint: extend the async playback OUT
++		 * endpoint descriptor to the 9-byte audio form and point its
++		 * bSynchAddress at the capture IN endpoint, and tag the capture IN
++		 * endpoint as an implicit-feedback data endpoint. (bEndpointAddress
++		 * of every ep was assigned above.)
++		 */
++		fs_epout_desc.bLength = USB_DT_ENDPOINT_AUDIO_SIZE;
++		hs_epout_desc.bLength = USB_DT_ENDPOINT_AUDIO_SIZE;
++		ss_epout_desc.bLength = USB_DT_ENDPOINT_AUDIO_SIZE;
++		fs_epout_desc.bSynchAddress = fs_epin_desc.bEndpointAddress;
++		hs_epout_desc.bSynchAddress = fs_epin_desc.bEndpointAddress;
++		ss_epout_desc.bSynchAddress = fs_epin_desc.bEndpointAddress;
++		fs_epin_desc.bmAttributes |= USB_ENDPOINT_USAGE_IMPLICIT_FB;
++		hs_epin_desc.bmAttributes |= USB_ENDPOINT_USAGE_IMPLICIT_FB;
++		ss_epin_desc.bmAttributes |= USB_ENDPOINT_USAGE_IMPLICIT_FB;
++	}
++
+ 	setup_descriptor(uac2_opts);
+ 
+ 	ret = usb_assign_descriptors(fn, fs_audio_desc, hs_audio_desc, ss_audio_desc,

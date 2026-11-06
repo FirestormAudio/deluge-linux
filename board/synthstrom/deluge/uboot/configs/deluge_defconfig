@@ -1,0 +1,94 @@
+#include <configs/renesas_rza1.config>
+
+CONFIG_ARM=y
+CONFIG_ARCH_RENESAS=y
+CONFIG_TEXT_BASE=0x0C000000
+CONFIG_DEFAULT_DEVICE_TREE="renesas/r7s72102-deluge"
+# Embed the device tree INSIDE the u-boot ELF so the JTAG-loaded image is
+# self-contained. With OF_SEPARATE the DTB is only appended to u-boot-dtb.bin,
+# which the ELF load path never sees -> fdtdec_setup() panics ("No valid device
+# tree binary found") and reset-loops.
+CONFIG_OF_EMBED=y
+CONFIG_TARGET_DELUGE=y
+
+# Crystal: 13.2256 MHz, P1 clock = 13.2256 * 5 = 66.128 MHz (SCIF source).
+# Override the 66666666 Hz value from renesas_rza1.config.
+CONFIG_SYS_CLK_FREQ=66128000
+
+# SDRAM at 0x0C000000; initial SP near top of 64 MB range.
+# Override the renesas_rza1.config SRAM values.
+CONFIG_HAS_CUSTOM_SYS_INIT_SP_ADDR=y
+CONFIG_CUSTOM_SYS_INIT_SP_ADDR=0x0FF00000
+CONFIG_SYS_LOAD_ADDR=0x0C008000
+
+# Shrink U-Boot's LMB stack reservation. lmb_reserve_uboot_region() reserves
+# [start_addr_sp - CONFIG_STACK_SIZE, ram_top), and the Kconfig default is a
+# generic 0x1000000 (16 MB) that no Renesas RZ/A1 config overrides. On this
+# 64 MB board that pins the top ~16 MB, so an in-place ramdisk at 0x0E800000
+# (initrd_high=0xffffffff) can only be ~6-7 MB before its end lands in the
+# reservation -> bootz "in-place initrd alloc failed". U-Boot's real stack use
+# is a few KB; 1 MB is ample and lifts the in-place initrd ceiling to
+# ~0x0FD00000, matching the app-loader's own ceiling (0x0FD20000).
+CONFIG_STACK_SIZE=0x100000
+
+CONFIG_BOARD_EARLY_INIT_F=y
+
+# Hardware is pre-initialized (CPG, BSC, SDRAM, GPIO) by the Deluge firmware
+# or by jlink/init_sdram.JLinkScript before U-Boot is loaded via JLink.
+# rza1-lowlevel_init.S must not run: it writes FRQCR=0x0035 (RSK board value)
+# but the Deluge uses 0x1035 (13.2256 MHz crystal), breaking SDRAM timing.
+CONFIG_SKIP_LOWLEVEL_INIT=y
+
+# No persistent environment: U-Boot only runs the compiled-in bootcmd.
+CONFIG_ENV_IS_NOWHERE=y
+CONFIG_ENV_SIZE=0x2000
+
+# No Ethernet on the Deluge.
+CONFIG_SH_ETHER=n
+CONFIG_PHY_SMSC=n
+CONFIG_BITBANGMII=n
+CONFIG_CMD_MII=n
+CONFIG_CMD_DHCP=n
+CONFIG_CMD_PING=n
+CONFIG_CMD_SNTP=n
+CONFIG_NET=n
+
+# ---- RTT console -------------------------------------------------------
+# Console over a SEGGER RTT control block in RAM at a fixed SRAM address
+# (0x20080000), read/written by J-Link via background memory access.  Unlike
+# semihosting this needs no CPU halt / exception vector / breakpoints, survives
+# U-Boot relocation, and is interactive.  See drivers/serial/serial_rtt.c and
+# jlink/harness.sh.  Point J-Link at it with: monitor exec SetRTTAddr 0x20080000
+CONFIG_RTT_SERIAL=y
+# Early (pre-DM, pre-relocation) console output via the same RTT block.
+CONFIG_DEBUG_UART=y
+CONFIG_DEBUG_UART_RTT=y
+CONFIG_DEBUG_UART_ANNOUNCE=y
+CONFIG_DEBUG_UART_BASE=0x0
+CONFIG_DEBUG_UART_CLOCK=0
+# Disable SCIF console (scif0 node stays in DTS for Linux, just not used here)
+CONFIG_SCIF_CONSOLE=n
+
+# Autoboot: bootz <zImage> <initrd> <dtb>. The three addresses MUST match
+# board/synthstrom/deluge/memory-map.json — the app-loader ELF places the
+# segments there, and this is the one place the map is necessarily duplicated.
+# The initrd is a uImage-wrapped cpio, so U-Boot reads its length from the
+# header and this command never has to know the rootfs size. The kernel's
+# cmdline is forced in-tree (CMDLINE_FORCE), so bootargs are irrelevant here.
+CONFIG_BOOTDELAY=0
+CONFIG_USE_BOOTCOMMAND=y
+CONFIG_BOOTCOMMAND="bootz 0x0e000000 0x0e800000 0x0df00000"
+
+# bootz boots the kernel already in RAM (placed by the app-loader or by J-Link).
+CONFIG_CMD_BOOTZ=y
+
+# Bring-up: run uncached, MMU off (skips dcache_enable which resets during
+# page-table setup on this SDRAM config).
+CONFIG_SYS_DCACHE_OFF=y
+
+# Build ARM (not Thumb): the RZ/A1 Cortex-A9 Thumb-2 U-Boot goes wild in
+# DM init (interworking); ARM avoids all ARM/Thumb state transitions.
+# CONFIG_SYS_THUMB_BUILD is not set
+
+# I-cache off too: JTAG-loaded code must not run against a stale I-cache.
+CONFIG_SYS_ICACHE_OFF=y

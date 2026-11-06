@@ -1,0 +1,13 @@
+config BR2_PACKAGE_DELUGE_ALSA_STATIC
+	bool "deluge-alsa-static"
+	depends on BR2_PACKAGE_ALSA_LIB
+	help
+	  A static-only second build of alsa-lib whose libasound.a is installed
+	  into the staging sysroot ONLY (never the target rootfs). It lets the SDK
+	  statically link libasound into apps, which run from the SD card and must
+	  not depend on any particular image's rootfs.
+
+	  Buildroot's alsa-lib builds shared OR static, not both (its configure.ac
+	  refuses "static and shared libraries together"), and every rootfs needs
+	  the shared libasound.so — so this provides the .a alongside it. Headers,
+	  alsa.pc and /usr/share/alsa come from the shared alsa-lib package.

@@ -1,0 +1,21 @@
+# Device nodes that must exist in the initramfs BEFORE /init mounts devtmpfs.
+#
+# /init's very first command is:
+#     mount -t devtmpfs none /dev 2>/dev/null
+# which cannot run at all unless /dev/null already exists — the redirect is
+# opened by the shell before the mount happens. Without these nodes PID 1 dies
+# before it can mount anything, with no console to say so.
+#
+# /dev/console  the kernel opens this for init's stdio; without it the kernel
+#               warns "unable to open an initial console" and init gets no fds.
+# /dev/kmsg     /init routes all its output here immediately after the mount.
+# /dev/ttyprintk console fallback.
+#
+# Buildroot's own device_table_dev.txt is NOT applied under
+# BR2_ROOTFS_DEVICE_CREATION_DYNAMIC_DEVTMPFS, so we supply these ourselves.
+#
+# <name>          <type> <mode> <uid> <gid> <major> <minor> <start> <inc> <count>
+/dev/console      c      600    0     0     5       1       -       -     -
+/dev/null         c      666    0     0     1       3       -       -     -
+/dev/kmsg         c      600    0     0     1       11      -       -     -
+/dev/ttyprintk    c      600    0     0     5       3       -       -     -

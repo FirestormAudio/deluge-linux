@@ -1,0 +1,19 @@
+config FB_DELUGE_OLED
+	tristate "Synthstrom Deluge OLED (SSD1309, 128x43 visible)"
+	depends on FB && SPI && INPUT_DELUGE_PIC
+	depends on ARCH_R7S72100 || COMPILE_TEST
+	select FB_SYSMEM_HELPERS_DEFERRED
+	help
+	  Framebuffer (128x43 mono; resolve the fb node by name, do not assume fb0)
+	  for the Deluge OLED. Pixels go over RSPI0; chip-select / D-C / power are
+	  mediated by the PIC (deluge-pic).
+
+config FB_DELUGE_PADS
+	tristate "Synthstrom Deluge RGB pad grid (18x8, via PIC)"
+	depends on FB && INPUT && INPUT_DELUGE_PIC
+	depends on ARCH_R7S72100 || COMPILE_TEST
+	select FB_SYSMEM_HELPERS_DEFERRED
+	select INPUT_MT
+	help
+	  18x8 RGB pad grid: multi-touch input (evdev) and per-pad RGB output
+	  (fbdev), streamed to the PIC (deluge-pic).

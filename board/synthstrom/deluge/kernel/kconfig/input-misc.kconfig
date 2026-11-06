@@ -1,0 +1,28 @@
+config INPUT_DELUGE_ENCODERS
+	tristate "Synthstrom Deluge rotary encoders"
+	depends on ARCH_R7S72100 || COMPILE_TEST
+	help
+	  6 rotary encoders on the Synthstrom Deluge, read via the RZ/A1 IRQC
+	  (one both-edge IRQ per encoder) with the companion phase sampled from
+	  the P1 port register. Reports relative motion; one event per detent.
+
+config INPUT_DELUGE_CLKIN
+	tristate "Synthstrom Deluge analog clock input"
+	depends on ARCH_R7S72100 || COMPILE_TEST
+	help
+	  Analog clock/trigger input for the Synthstrom Deluge on P1.14 (RZ/A1
+	  IRQC IRQ6, falling edge), exposed as an evdev device emitting one
+	  MSC_RAW event per pulse.
+
+config INPUT_DELUGE_PIC
+	tristate "Synthstrom Deluge PIC front-panel (pads + buttons)"
+	depends on ARCH_R7S72100 || COMPILE_TEST
+	depends on DMADEVICES
+	select DMA_ENGINE
+	help
+	  The Deluge PIC32 front-panel controller on SCIF1. Decodes the PIC
+	  byte stream, dispatching pad events to the pad driver (see
+	  FB_DELUGE_PADS) and exposing the 36 buttons as a "Deluge Buttons"
+	  key device. Self-contained: owns SCIF1 and a re-armed slave_sg
+	  DMAC RX ring (the RZ/A1 SCIF RX request is DMAC-routed, not
+	  GIC-routed).

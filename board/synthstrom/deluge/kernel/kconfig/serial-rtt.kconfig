@@ -1,0 +1,11 @@
+config SERIAL_EARLYCON_RTT
+	bool "Early console using SEGGER RTT (Deluge / RZ/A1L bring-up)"
+	depends on ARM
+	select SERIAL_CORE
+	select SERIAL_CORE_CONSOLE
+	select SERIAL_EARLYCON
+	help
+	  Early console that writes into a SEGGER RTT control block in on-chip
+	  SRAM, read by a J-Link debug probe via background memory access (no
+	  UART needed).  U-Boot sets up and hands off the control block.
+	  Enable with "earlycon=rtt,0x20080000" on the kernel command line.

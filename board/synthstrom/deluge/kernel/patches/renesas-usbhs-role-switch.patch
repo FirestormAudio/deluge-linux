@@ -1,0 +1,208 @@
+diff --git a/drivers/usb/renesas_usbhs/common.c b/drivers/usb/renesas_usbhs/common.c
+index 8c93bde4b..bcf64f659 100644
+--- a/drivers/usb/renesas_usbhs/common.c
++++ b/drivers/usb/renesas_usbhs/common.c
+@@ -88,6 +88,11 @@ int usbhs_get_id_as_gadget(struct platform_device *pdev)
+ 	return USBHS_GADGET;
+ }
+ 
++int usbhs_get_id_forced(struct platform_device *pdev)
++{
++	return usbhs_pdev_to_priv(pdev)->forced_id;
++}
++
+ /*
+  *		syscfg functions
+  */
+@@ -505,6 +510,58 @@ static void usbhsc_hotplug(struct usbhs_priv *priv)
+ 	}
+ }
+ 
++/*
++ * Deluge manual role switch.
++ *
++ * The board straps the VBUS sense pin to 5V, so the autonomy hotplug path
++ * never sees VBUS drop and cannot switch roles on its own. Drive the switch
++ * explicitly here, reusing the enable/disable arms of usbhsc_hotplug().
++ */
++int usbhs_role_switch(struct usbhs_priv *priv, int id)
++{
++	struct platform_device *pdev = usbhs_priv_to_pdev(priv);
++	struct usbhs_mod *target;
++	int ret = 0;
++
++	if (id != USBHS_HOST && id != USBHS_GADGET)
++		return -EINVAL;
++
++	mutex_lock(&priv->role_lock);
++
++	/* serialize against the VBUS hotplug worker */
++	flush_delayed_work(&priv->notify_hotplug_work);
++
++	/* target module must be built in (host needs CONFIG_USB..._HCD) */
++	target = usbhs_mod_get(priv, id);
++	if (!target) {
++		ret = -ENODEV;
++		goto out;
++	}
++
++	/* already in this role? */
++	if (usbhs_mod_get_current(priv) == target)
++		goto out;
++
++	/* tear down the current role (mirrors usbhsc_hotplug disable arm) */
++	if (usbhs_mod_get_current(priv)) {
++		usbhs_mod_call(priv, stop, priv);
++		usbhsc_bus_init(priv);
++		usbhs_mod_change(priv, -1);
++		usbhs_platform_call(priv, phy_reset, pdev);
++	}
++
++	/* bring up the requested role (mirrors usbhsc_hotplug enable arm) */
++	priv->forced_id = id;
++	usbhs_mod_change(priv, id);
++	usbhsc_set_buswait(priv);
++	usbhsc_bus_init(priv);
++	usbhs_mod_call(priv, start, priv);
++
++out:
++	mutex_unlock(&priv->role_lock);
++	return ret;
++}
++
+ /*
+  *		notify hotplug
+  */
+@@ -607,6 +664,47 @@ static const struct of_device_id usbhs_of_match[] = {
+ };
+ MODULE_DEVICE_TABLE(of, usbhs_of_match);
+ 
++/*
++ *		role sysfs (Deluge manual host/peripheral switch)
++ */
++static ssize_t role_show(struct device *dev,
++			 struct device_attribute *attr, char *buf)
++{
++	struct usbhs_priv *priv = dev_get_drvdata(dev);
++
++	return sysfs_emit(buf, "%s\n",
++			  usbhs_mod_is_host(priv) > 0 ? "host" : "peripheral");
++}
++
++static ssize_t role_store(struct device *dev,
++			  struct device_attribute *attr,
++			  const char *buf, size_t count)
++{
++	struct usbhs_priv *priv = dev_get_drvdata(dev);
++	int id, ret;
++
++	if (sysfs_streq(buf, "host"))
++		id = USBHS_HOST;
++	else if (sysfs_streq(buf, "peripheral"))
++		id = USBHS_GADGET;
++	else
++		return -EINVAL;
++
++	ret = usbhs_role_switch(priv, id);
++
++	return ret < 0 ? ret : count;
++}
++static DEVICE_ATTR_RW(role);
++
++static struct attribute *usbhs_role_attrs[] = {
++	&dev_attr_role.attr,
++	NULL,
++};
++
++static const struct attribute_group usbhs_role_group = {
++	.attrs = usbhs_role_attrs,
++};
++
+ static int usbhs_probe(struct platform_device *pdev)
+ {
+ 	const struct renesas_usbhs_platform_info *info;
+@@ -688,6 +786,8 @@ static int usbhs_probe(struct platform_device *pdev)
+ 	priv->pdev	= pdev;
+ 	INIT_DELAYED_WORK(&priv->notify_hotplug_work, usbhsc_notify_hotplug);
+ 	spin_lock_init(usbhs_priv_to_lock(priv));
++	mutex_init(&priv->role_lock);
++	priv->forced_id = USBHS_GADGET;	/* default peripheral (USBHS_HOST == 0) */
+ 
+ 	/*
+ 	 * Acquire clocks and enable power management (PM) early in the
+@@ -779,6 +879,13 @@ static int usbhs_probe(struct platform_device *pdev)
+ 	 */
+ 	usbhsc_schedule_notify_hotplug(pdev);
+ 
++	if (priv->manual_role) {
++		int rret = devm_device_add_group(dev, &usbhs_role_group);
++
++		if (rret < 0)
++			dev_warn(dev, "role sysfs unavailable (%d)\n", rret);
++	}
++
+ 	dev_info(dev, "probed\n");
+ 
+ 	return ret;
+diff --git a/drivers/usb/renesas_usbhs/common.h b/drivers/usb/renesas_usbhs/common.h
+index 9c75b38cb..085354120 100644
+--- a/drivers/usb/renesas_usbhs/common.h
++++ b/drivers/usb/renesas_usbhs/common.h
+@@ -11,6 +11,7 @@
+ 
+ #include <linux/clk.h>
+ #include <linux/extcon.h>
++#include <linux/mutex.h>
+ #include <linux/platform_device.h>
+ #include <linux/reset.h>
+ #include <linux/usb/renesas_usbhs.h>
+@@ -264,6 +265,17 @@ struct usbhs_priv {
+ 
+ 	spinlock_t		lock;
+ 
++	/*
++	 * Deluge manual host/peripheral role switch via the "role" sysfs
++	 * attribute. forced_id holds the selected role and is returned by
++	 * usbhs_get_id_forced(); role_lock serializes switches against the
++	 * hotplug worker; manual_role gates attribute creation and is set
++	 * only by the RZ/A1 glue.
++	 */
++	int			forced_id;
++	struct mutex		role_lock;
++	bool			manual_role;
++
+ 	/*
+ 	 * module control
+ 	 */
+@@ -295,6 +307,8 @@ void usbhs_bset(struct usbhs_priv *priv, u32 reg, u16 mask, u16 data);
+ #define usbhs_unlock(p, f) spin_unlock_irqrestore(usbhs_priv_to_lock(p), f)
+ 
+ int usbhs_get_id_as_gadget(struct platform_device *pdev);
++int usbhs_get_id_forced(struct platform_device *pdev);
++int usbhs_role_switch(struct usbhs_priv *priv, int id);
+ 
+ /*
+  * sysconfig
+diff --git a/drivers/usb/renesas_usbhs/rza.c b/drivers/usb/renesas_usbhs/rza.c
+index 97b5217c5..3d6f5d675 100644
+--- a/drivers/usb/renesas_usbhs/rza.c
++++ b/drivers/usb/renesas_usbhs/rza.c
+@@ -18,6 +18,9 @@ static int usbhs_rza1_hardware_init(struct platform_device *pdev)
+ 	struct device_node *usb_x1_clk, *extal_clk;
+ 	u32 freq_usb = 0, freq_extal = 0;
+ 
++	/* Deluge: enable manual host/peripheral role switching via sysfs. */
++	priv->manual_role = true;
++
+ 	/* Input Clock Selection (NOTE: ch0 controls both ch0 and ch1) */
+ 	usb_x1_clk = of_find_node_by_name(NULL, "usb_x1");
+ 	extal_clk = of_find_node_by_name(NULL, "extal");
+@@ -48,7 +51,7 @@ static int usbhs_rza1_hardware_init(struct platform_device *pdev)
+ const struct renesas_usbhs_platform_info usbhs_rza1_plat_info = {
+ 	.platform_callback = {
+ 		.hardware_init = usbhs_rza1_hardware_init,
+-		.get_id = usbhs_get_id_as_gadget,
++		.get_id = usbhs_get_id_forced,
+ 	},
+ 	.driver_param = {
+ 		.has_new_pipe_configs = 1,

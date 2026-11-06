@@ -1,0 +1,2 @@
+# Profile overlays drop service dirs (each with an executable `run`) here.
+# runsvdir ignores non-directory entries like this one.

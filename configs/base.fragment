@@ -1,0 +1,6 @@
+# Base profile: the appliance rootfs every image is built on. The common
+# overlay alone; no shell, no network. The app slot — /usr/bin/deluge-app (a
+# stub here) plus the runit service that launches it — lives in common, not
+# here: deluge-mkimage bakes the app to that one path regardless of --profile,
+# so every profile needs the same slot.
+BR2_ROOTFS_OVERLAY="$(BR2_EXTERNAL_DELUGE_PATH)/board/synthstrom/deluge/rootfs/overlay/common"

@@ -1,0 +1,15 @@
+if TARGET_DELUGE
+
+config SYS_BOARD
+	default "deluge"
+
+config SYS_VENDOR
+	default "renesas"
+
+config SYS_SOC
+	default "r7s72100"
+
+config SYS_CONFIG_NAME
+	default "deluge"
+
+endif

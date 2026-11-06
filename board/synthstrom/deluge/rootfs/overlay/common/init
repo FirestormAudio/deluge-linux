@@ -1,0 +1,58 @@
+#!/bin/sh
+# PID 1 for the Deluge initramfs. Do one-time setup, then hand off to runsvdir
+# (a BusyBox runit applet) to supervise /etc/service.
+export PATH=/usr/sbin:/usr/bin:/sbin:/bin
+
+# Mount devtmpfs FIRST so /dev/kmsg exists, then route ALL output to it.
+# /dev/console is hvc0 (SEGGER RTT); with no debugger draining it, a write
+# BLOCKS and hangs PID 1 — the documented "won't boot without RTT" cause.
+/bin/busybox mount -t devtmpfs none /dev 2>/dev/null
+exec >/dev/kmsg 2>&1
+
+/bin/busybox mount -t proc  none /proc
+/bin/busybox mount -t sysfs none /sys
+/bin/busybox mount -t tmpfs none /tmp
+/bin/busybox mount -t tmpfs none /run
+# devpts provides pseudo-terminals — SSH/dropbear sessions need a pty.
+/bin/busybox mkdir -p /dev/pts /sd
+/bin/busybox mount -t devpts none /dev/pts 2>/dev/null
+[ -f /etc/hostname ] && /bin/busybox hostname -F /etc/hostname
+
+# Boot splash on the OLED. Resolve its framebuffer by the stable driver name
+# ("deluge-oled"; the fb number is probe-order dependent) and export for splash
+# and the child services. sp() is a guarded call — a no-op if splash/fb absent.
+for _f in /sys/class/graphics/fb*; do
+	[ -r "$_f/name" ] && [ "$(/bin/busybox cat "$_f/name")" = "deluge-oled" ] && \
+		{ export SPLASH_FB="/dev/${_f##*/}"; break; }
+done
+export SPLASH_PCT=/run/splash.pct
+sp() { [ -n "$SPLASH_FB" ] && [ -x /usr/bin/splash ] && /usr/bin/splash "$1" 2>/dev/null; }
+sp 5
+
+echo "deluge: init — mounts done"
+sp 25
+
+# Assemble the USB gadget (ACM console + platform NCM) before services need
+# ttyGS0. configfs-based, so the console is userspace-assembled here.
+if /usr/sbin/deluge-gadget; then echo "deluge: usb gadget bound"; else echo "deluge: usb gadget assembly FAILED"; fi
+sp 50
+
+# Mount the SD (vfat) read-write at /sd for user content (samples, scripts).
+# Card enumeration is async (~1.6 s); wait briefly for the block device.
+i=0
+while [ $i -lt 15 ]; do
+	[ -b /dev/mmcblk0p1 ] && { /bin/busybox mount -t vfat -o rw /dev/mmcblk0p1 /sd && echo "deluge: SD mounted at /sd"; break; }
+	[ -b /dev/mmcblk0 ]   && { /bin/busybox mount -t vfat -o rw /dev/mmcblk0   /sd && echo "deluge: SD mounted at /sd"; break; }
+	i=$((i + 1)); /bin/busybox sleep 1
+done
+[ -d /sd/scripts ] || echo "deluge: no /sd/scripts (empty or no card)"
+sp 75
+
+# Enable mdev as the kernel hotplug helper so USB storage partitions
+# auto-mount under /media/<name> via /etc/mdev.conf -> deluge-automount.
+echo /sbin/mdev > /proc/sys/kernel/hotplug
+/sbin/mdev -s
+
+sp 95
+echo "deluge: starting runsvdir /etc/service"
+exec /bin/busybox runsvdir /etc/service

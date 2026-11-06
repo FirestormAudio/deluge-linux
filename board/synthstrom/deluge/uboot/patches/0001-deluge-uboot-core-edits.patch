@@ -1,0 +1,120 @@
+diff --git a/arch/arm/dts/Makefile b/arch/arm/dts/Makefile
+index d90e02ca..40981b44 100644
+--- a/arch/arm/dts/Makefile
++++ b/arch/arm/dts/Makefile
+@@ -904,7 +904,8 @@ dtb-$(CONFIG_ARCH_IMXRT) += imxrt1020-evk.dtb \
+ 
+ dtb-$(CONFIG_RZA1) += \
+ 	r7s72100-genmai.dtb \
+-	r7s72100-gr-peach.dtb
++	r7s72100-gr-peach.dtb \
++	r7s72102-deluge.dtb
+ 
+ dtb-$(CONFIG_RCAR_GEN5) += \
+ 	r8a78000-ironhide.dtb
+diff --git a/arch/arm/lib/semihosting.S b/arch/arm/lib/semihosting.S
+index 6e1691a8..167b266a 100644
+--- a/arch/arm/lib/semihosting.S
++++ b/arch/arm/lib/semihosting.S
+@@ -16,20 +16,26 @@ ENTRY(smh_trap)
+ #elif defined(CONFIG_CPU_V7M)
+ 	bkpt	#0xab
+ #elif defined(CONFIG_SYS_THUMB_BUILD)
+-	svc	#0xab
++	/* smh_trap is in a dedicated ARM-mode section (.text.smh_trap), so this is
++	 * the branch our Thumb U-Boot actually compiles.  Standard ARM-convention
++	 * SVC semihosting; J-Link is armed with the SVC vector (see #else branch). */
++	svc	#0x123456
+ #else
+-#if CONFIG_SYS_ARM_ARCH < 7
+-	/* Before the ARMv7 exception model, svc (swi) clobbers lr */
+-	mov	r2, lr
+-#endif
++	/*
++	 * Deluge bring-up: J-Link traps semihosting via the SVC exception vector.
++	 * The GDB Server is armed with 'monitor semihosting enable <vector>' at
++	 * VBAR+0x08, and the jlink harness re-arms it at the relocated vector after
++	 * U-Boot moves VBAR during relocation.  Standard ARM-convention SVC number.
++	 * The trap is handled by the debugger before the CPU takes the exception,
++	 * so lr is not actually clobbered and 'bx lr' returns correctly.
++	 */
+ 	svc	#0x123456
+ #endif
+ 
+ #if defined(CONFIG_ARM64)
+ 	ret
+-#elif CONFIG_SYS_ARM_ARCH < 7
+-	bx	r2
+ #else
++	/* BKPT preserves lr on all ARM arches, so no r2 save/restore is needed. */
+ 	bx	lr
+ #endif
+ 
+diff --git a/arch/arm/mach-renesas/Kconfig.rza1 b/arch/arm/mach-renesas/Kconfig.rza1
+index c9e2b835..1d22c14b 100644
+--- a/arch/arm/mach-renesas/Kconfig.rza1
++++ b/arch/arm/mach-renesas/Kconfig.rza1
+@@ -20,10 +20,14 @@ config TARGET_GENMAI
+ config TARGET_GRPEACH
+ 	bool "GR-PEACH board"
+ 
++config TARGET_DELUGE
++	bool "Synthstrom Audible Deluge"
++
+ endchoice
+ 
+ # Renesas Supported Boards
+ source "board/renesas/genmai/Kconfig"
+ source "board/renesas/grpeach/Kconfig"
++source "board/renesas/deluge/Kconfig"
+ 
+ endif
+diff --git a/drivers/serial/Kconfig b/drivers/serial/Kconfig
+index c86c883e..903eadaf 100644
+--- a/drivers/serial/Kconfig
++++ b/drivers/serial/Kconfig
+@@ -439,6 +439,14 @@ config DEBUG_UART_SEMIHOSTING
+ 	  start up driver model. The driver will be available until the real
+ 	  driver model serial is running.
+ 
++config DEBUG_UART_RTT
++	bool "SEGGER RTT"
++	depends on RTT_SERIAL
++	help
++	  Select this to enable the debug UART using the SEGGER RTT driver.
++	  Provides early console output (before driver model) into the same
++	  fixed-SRAM RTT control block used by the RTT serial driver.
++
+ config DEBUG_UART_SCIF
+ 	bool "Renesas SCIF UART"
+ 	depends on SH || ARCH_RENESAS
+@@ -962,6 +970,17 @@ config SEMIHOSTING_SERIAL
+ 	  semihosting. If you are not using a debugger, this driver will halt
+ 	  the boot.
+ 
++config RTT_SERIAL
++	bool "SEGGER RTT serial console"
++	depends on DM_SERIAL
++	help
++	  A serial console that transports characters through a SEGGER RTT
++	  control block in RAM, read and written by a J-Link debug probe via
++	  background memory access (no CPU halt, no exception vector, no
++	  breakpoints).  The control block sits at a fixed SRAM address so it
++	  survives U-Boot relocation.  Used for Synthstrom Deluge (RZ/A1L)
++	  bring-up, where no debug UART is accessible.
++
+ config UNIPHIER_SERIAL
+ 	bool "Support for UniPhier on-chip UART"
+ 	depends on ARCH_UNIPHIER
+diff --git a/drivers/serial/Makefile b/drivers/serial/Makefile
+index 66088b44..4b6acee1 100644
+--- a/drivers/serial/Makefile
++++ b/drivers/serial/Makefile
+@@ -33,6 +33,7 @@ obj-$(CONFIG_XILINX_UARTLITE) += serial_xuartlite.o
+ obj-$(CONFIG_SANDBOX_SERIAL) += sandbox.o
+ obj-$(CONFIG_SCIF_CONSOLE) += serial_sh.o
+ obj-$(CONFIG_SEMIHOSTING_SERIAL) += serial_semihosting.o
++obj-$(CONFIG_RTT_SERIAL) += serial_rtt.o
+ obj-$(CONFIG_ZYNQ_SERIAL) += serial_zynq.o
+ obj-$(CONFIG_FSL_LPUART) += serial_lpuart.o
+ obj-$(CONFIG_ARC_SERIAL) += serial_arc.o

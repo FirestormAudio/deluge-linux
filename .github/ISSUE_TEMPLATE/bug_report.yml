@@ -1,0 +1,80 @@
+name: Bug report
+description: Something built but misbehaves on the board
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        For a build that fails on the host, use the "Build failure" template.
+        This one is for images that boot, or nearly boot, and misbehave.
+
+  - type: dropdown
+    id: profile
+    attributes:
+      label: Profile
+      options: [base, platform, both]
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Release tag, or `git rev-parse --short HEAD` for a source build.
+      placeholder: v0.1.0 / 0d577fc
+    validations:
+      required: true
+
+  - type: dropdown
+    id: subsystem
+    attributes:
+      label: Subsystem
+      description: See docs/drivers.md.
+      options:
+        - audio (deluge-ssi / deluge-audio)
+        - MIDI (deluge-midi / f_midi2)
+        - OLED (deluge-oled)
+        - pad grid (deluge-pad)
+        - buttons / encoders (deluge-pic / deluge-encoders)
+        - clock in (deluge-clkin)
+        - LEDs (leds-deluge)
+        - CV / gate (deluge-cv)
+        - SRAM (deluge-sram)
+        - USB gadget
+        - boot / U-Boot
+        - other or unsure
+    validations:
+      required: true
+
+  - type: textarea
+    id: what
+    attributes:
+      label: What happens, and what you expected instead
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. make base && make appelf
+        2. python3 tools/devupload.py out/LINUX.ELF
+        3. ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: dmesg
+    attributes:
+      label: dmesg
+      description: |
+        `dmesg | grep -i deluge` at minimum; full dmesg is better. Needs the
+        `platform` profile or a serial/RTT console — see docs/debugging.md.
+      render: text
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Anything else
+      description: Local patches, defconfig changes, hardware revision.

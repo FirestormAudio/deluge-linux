@@ -1,0 +1,442 @@
+// SPDX-License-Identifier: GPL-2.0
+/*
+ * Device tree for the Synthstrom Audible Deluge (Renesas RZ/A1L, R7S72102).
+ *
+ * Full board: SD boot (sdhi1), USB (usbhs0), the PIC32 front-panel link
+ * (scif1, pads/buttons/LEDs/7-seg/OLED all mediated through it), DIN MIDI
+ * (scif0), 6 rotary encoders, analog clock input (clkin), CV/gate, the RGB
+ * pad grid, and the SSI0 audio path — no UART is wired out on this board, so
+ * the console is a SEGGER RTT block in SRAM read by J-Link, matching U-Boot.
+ *
+ * Cortex-A9 @ ~400 MHz, 64 MB SDRAM at 0x0C000000 (CS3), 13.2256 MHz crystal.
+ */
+
+/dts-v1/;
+#include "r7s72100.dtsi"
+#include <dt-bindings/pinctrl/r7s72100-pinctrl.h>
+#include <dt-bindings/interrupt-controller/irq.h>
+#include <dt-bindings/interrupt-controller/arm-gic.h>
+#include <dt-bindings/gpio/gpio.h>
+
+/ {
+	model = "Synthstrom Audible Deluge";
+	compatible = "synthstrom,deluge", "renesas,r7s72100";
+
+	memory@c000000 {
+		device_type = "memory";
+		reg = <0x0c000000 0x04000000>;	/* 64 MB SDRAM on CS3 */
+	};
+
+	chosen {
+		/*
+		 * RTT earlycon: writes to the SEGGER RTT block at SRAM
+		 * 0x20080000 (set up by U-Boot), read by J-Link in the
+		 * background, and stays active as the console. No UART is
+		 * wired out on this board.
+		 */
+		bootargs = "earlycon=rtt,0x20080000 ignore_loglevel";
+	};
+};
+
+/* Deluge crystal is 13.2256 MHz (genmai/rskrza1 use 13.33 MHz). */
+&extal_clk {
+	clock-frequency = <13225600>;
+};
+
+/* Dedicated 48 MHz USB clock (USB_X1). The renesas_usbhs RZ/A1 init
+ * (drivers/usb/renesas_usbhs/rza.c) requires either a non-zero usb_x1
+ * clock-frequency (→ UCKSEL=0, 48 MHz USB_X1) or extal==12 MHz; our EXTAL is
+ * 13.2256 MHz, so the USB clock MUST come from usb_x1 or the UDC probe fails
+ * with "A 48MHz USB clock or 12MHz main clock is required." */
+&usb_x1_clk {
+	clock-frequency = <48000000>;
+};
+
+/* OSTM timers: the renesas-ostm driver makes the FIRST enabled OSTM the
+ * clocksource and the SECOND the clockevent. Both are required — with only
+ * ostm0 there is no hardware tick, so jiffies-based delays (msleep, usleep,
+ * userspace sleep) stall and drivers that wait on them (e.g. MMC card
+ * enumeration) never progress. Enable both, like the rskrza1 reference. */
+&ostm0 {
+	status = "okay";		/* clocksource */
+};
+
+&ostm1 {
+	status = "okay";		/* clockevent (system tick) */
+};
+
+/* DMAC is the mainline "renesas,rz-dmac" node (#dma-cells=1), no nbpf override.
+ * PIC (SCIF1) uses an rz-dmac slave_sg channel; MIDI (SCIF0) uses the SCIF
+ * RXI/TXI GIC interrupts (no DMA) — so nothing needs nbpf's cyclic mode.
+ *
+ * Cap rz-dmac at 6 channels (ch0-5) so it does NOT claim ch6/7: deluge-ssi
+ * raw-drives those for SSI0 TX/RX and owns their DMAINT (transfer-end)
+ * interrupts directly. This matches the historical split ("nbpf keeps ch0-5;
+ * we own ch6"). The PIC still gets a channel out of ch0-5. */
+&dmac {
+	dma-channels = <6>;
+};
+
+/*
+ * On-chip large-capacity RAM (3 MB total @ 0x20000000). The bottom 1 MB
+ * (0x20000000, incl. the 128 KB data-retention RAM and the SEGGER RTT console
+ * block @ 0x20080000) is left alone. The upper 2 MB is split:
+ *
+ *  - 0x20100000, 1 MB: non-cached DMA gen_pool (mmio-sram). no-memory-wc =
+ *    strictly non-cached, so allocations are DMA-coherent without barriers AND
+ *    deterministic 0-wait for the RT audio path. Consumers (deluge-ssi,
+ *    deluge-pic) take DMA descriptors and buffers from here to keep continuous
+ *    DMA off the contended SDRAM bus (~75 KB used; 1 MB is ample headroom).
+ *
+ *  - 0x20200000, 1 MB: CACHED userspace scratch, handed to the Spark synth via
+ *    /dev/deluge-sram (deluge-sram driver) for hot DSP data. Disjoint from the
+ *    non-cached pool above — the two must NOT overlap, as mismatched cache
+ *    attributes on the same physical address are UNPREDICTABLE on ARM.
+ */
+/ {
+	sram: sram@20100000 {
+		compatible = "mmio-sram";
+		reg = <0x20100000 0x100000>;
+		no-memory-wc;
+		#address-cells = <1>;
+		#size-cells = <1>;
+		ranges = <0 0x20100000 0x100000>;
+	};
+
+	deluge_sram: sram-user@20200000 {
+		compatible = "synthstrom,deluge-sram";
+		reg = <0x20200000 0x100000>;
+	};
+};
+
+/* SD card slot: SDHI1, 4-bit, on Port 7 alt-func 3 (the Deluge differs from
+ * the rskrza1 reference, which puts SDHI1 on Port 3 func 7). Card-detect and
+ * write-protect are native SDHI controller pins (SD_CD_1/SD_WP_1) read from
+ * SD_INFO1 — no cd-gpios/wp-gpios. Card power is fixed 3.3 V in hardware (no
+ * regulator/GPIO). SDK caps the clock at P1/4 ~= 16.7 MHz and does no HS
+ * switch, so we bound max-frequency to the known-good rate. Source facts:
+ * deluge-sdk crates/deluge-bsp/src/sd.rs + rza1l-hal/src/sdhi.rs. */
+&pinctrl {
+	sdhi1_pins: sdhi1 {
+		pinmux = <RZA1_PINMUX(7, 0, 3)>,	/* SD_CD_1  */
+			 <RZA1_PINMUX(7, 1, 3)>,	/* SD_WP_1  */
+			 <RZA1_PINMUX(7, 2, 3)>,	/* SD_D1_1  */
+			 <RZA1_PINMUX(7, 3, 3)>,	/* SD_D0_1  */
+			 <RZA1_PINMUX(7, 4, 3)>,	/* SD_CLK_1 */
+			 <RZA1_PINMUX(7, 5, 3)>,	/* SD_CMD_1 */
+			 <RZA1_PINMUX(7, 6, 3)>,	/* SD_D3_1  */
+			 <RZA1_PINMUX(7, 7, 3)>;	/* SD_D2_1  */
+	};
+};
+
+&sdhi1 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&sdhi1_pins>;
+	bus-width = <4>;
+	max-frequency = <16700000>;
+	status = "okay";
+};
+
+/* USB channel 0 (the physical jack) as a peripheral/gadget: renesas_usbhs UDC
+ * for a CDC-ACM console. Self-powered, VBUS sense-only (no vbus-supply), USB
+ * pins are dedicated analog (no pinctrl). Role is software (DCFM) -> peripheral.
+ * The Deluge jack is on channel 0 (usbhs0 @ 0xe8010000); usbhs1 is unused. */
+&usbhs0 {
+	/* Dual-role: renesas_usbhs ignores dr_mode and chooses the role via the
+	 * "role" sysfs attribute (default = peripheral). "otg" is the honest
+	 * description of the port's capability; the board supplies VBUS
+	 * unconditionally from a step-down off the barrel jack. */
+	dr_mode = "otg";
+	status = "okay";
+};
+
+/* Rotary encoders: 6 encoders on port P1. Each has phase A on an IRQC
+ * external-interrupt line (mux 2 = IRQ function) and phase B on a plain P1 GPIO
+ * read from the port register. Custom driver (synthstrom,deluge-encoders) —
+ * mainline rotary-encoder needs an IRQ per phase and the RZ/A1 has only 8 IRQ
+ * lines. No bias: the board provides external pulls. */
+&pinctrl {
+	encoder_pins: encoders {
+		pinmux = <RZA1_PINMUX(1, 8,  2)>,	/* scroll_y A / IRQ0 */
+			 <RZA1_PINMUX(1, 5,  2)>,	/* mod1 A     / IRQ1 */
+			 <RZA1_PINMUX(1, 6,  2)>,	/* tempo A    / IRQ2 */
+			 <RZA1_PINMUX(1, 11, 2)>,	/* scroll_x A / IRQ3 */
+			 <RZA1_PINMUX(1, 0,  2)>,	/* mod0 A     / IRQ4 */
+			 <RZA1_PINMUX(1, 3,  2)>;	/* select A   / IRQ7 */
+	};
+};
+
+/ {
+	encoders {
+		compatible = "synthstrom,deluge-encoders";
+		/* RZ/A1 P1 Port Pin Read register (pinctrl@fcfe3000 + 0x204); read
+		 * directly for encoder phase A/B levels (pin is IRQ-muxed, so gpiod
+		 * can't read it). Region owned by pinctrl, so the driver ioremaps
+		 * without claiming it. */
+		synthstrom,port-read-reg = <0xfcfe3204>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&encoder_pins>;
+		interrupt-parent = <&irqc>;
+		interrupts = <0 IRQ_TYPE_EDGE_BOTH>,	/* scroll_y */
+			     <1 IRQ_TYPE_EDGE_BOTH>,	/* mod1 */
+			     <2 IRQ_TYPE_EDGE_BOTH>,	/* tempo */
+			     <3 IRQ_TYPE_EDGE_BOTH>,	/* scroll_x */
+			     <4 IRQ_TYPE_EDGE_BOTH>,	/* mod0 */
+			     <7 IRQ_TYPE_EDGE_BOTH>;	/* select */
+	};
+};
+
+/* PIC32 front-panel link: SCIF1 @ 200000 (after a 31250 handshake). The
+ * PIC owns the 144 pads, 36 buttons, LEDs and 7-seg; it talks a flat byte stream
+ * over SCIF1. A serdev driver (synthstrom,deluge-pic) decodes pads+buttons into
+ * an evdev device. TxD1=P3.15 mux5, RxD1=P1.9 mux3 (no conflict with encoders).
+ * Must NOT be a console so serdev can claim it. */
+&pinctrl {
+	scif1_pins: scif1 {
+		pinmux = <RZA1_PINMUX(3, 15, 5)>,	/* TxD1 */
+			 <RZA1_PINMUX(1, 9,  3)>;	/* RxD1 */
+	};
+};
+
+&pinctrl {
+	clkin_pins: clkin {
+		pinmux = <RZA1_PINMUX(1, 14, 2)>;	/* P1.14 alt-2 = IRQ6 */
+	};
+};
+
+/ {
+	/* Analog clock input: P1.14 -> IRQC IRQ6, falling edge (transistor
+	 * inverts the external pulse). Emitted as evdev EV_MSC/MSC_RAW, one event
+	 * per pulse. */
+	clkin {
+		compatible = "synthstrom,deluge-clkin";
+		pinctrl-names = "default";
+		pinctrl-0 = <&clkin_pins>;
+		interrupt-parent = <&irqc>;
+		interrupts = <6 IRQ_TYPE_EDGE_FALLING>;
+	};
+};
+
+/* Gate outputs (V-trig, active-low: 0 = gate ON). Exposed as named GPIO
+ * character-device lines; userspace claims them active-low via the GPIO v2 uAPI.
+ * P2.7/8/9 = gate0/1/2, P4.0 = gate3. */
+&port2 {
+	gpio-line-names =
+		"", "", "", "", "", "", "",
+		"deluge-gate0",		/* P2.7 */
+		"deluge-gate1",		/* P2.8 */
+		"deluge-gate2";		/* P2.9 */
+};
+
+&port4 {
+	gpio-line-names = "deluge-gate3";	/* P4.0 */
+};
+
+/*
+ * SCIF1 drives the PIC32 front-panel. Take the node away from sh-sci by
+ * overriding its compatible: the deluge-pic driver owns SCIF1 directly (its
+ * registers + an rz-dmac slave_sg RX channel drained by a 1 ms poll), because
+ * on RZ/A1 the SCIF RX-FIFO request is wired to the DMAC, not the GIC, and the
+ * tty/serial layer could not drive that reliably. DMARS terminal 0x066 = SCIF1
+ * RXI; level/high request line (encoded in the dmas config nibble).
+ */
+&scif1 {
+	compatible = "synthstrom,deluge-pic";
+	pinctrl-names = "default";
+	pinctrl-0 = <&scif1_pins>;
+	/* SCIF1 RXI: MID/RID 0x66 (DMARS, as nbpf used) | config 0x2C00.
+	 * rz-dmac decodes cfg = args[0][15:10]: bit0->HIEN, bit1->LVL,
+	 * bits[4:2]->AM. 0x2C00>>10 = 0x0B = HIEN|LVL|AM(0x200), reproducing
+	 * the proven nbpf CHCFG (DMS|SAD|HIEN|LVL|AM added by the driver).
+	 * The previous 0x2466 dropped LVL -> SCIF RXI (a *level* request) was
+	 * sensed as an edge, so the channel armed but never drained the FIFO. */
+	dmas = <&dmac 0x2C66>;
+	dma-names = "rx";
+	sram = <&sram>;			/* DMA RX ring in on-chip SRAM */
+	status = "okay";
+};
+
+&pinctrl {
+	scif0_pins: scif0 {
+		pinmux = <RZA1_PINMUX(6, 15, 5)>,	/* TxD0 (MIDI OUT) */
+			 <RZA1_PINMUX(6, 14, 5)>;	/* RxD0 (MIDI IN)  */
+	};
+};
+
+/*
+ * DIN 5-pin MIDI over SCIF0 @ 31250 bps. At this low rate the SCIF's own GIC
+ * interrupts carry MIDI directly (no DMA): deluge-midi uses the RXI/TXI lines
+ * (interrupts + interrupt-names inherited from the base r7s72100.dtsi scif0
+ * node) and registers as an ASoC aux component on the Deluge sound card
+ * (rawmidi midiC0D0). This is what lets the DMAC be pure rz-dmac (no cyclic).
+ */
+&scif0 {
+	compatible = "synthstrom,deluge-midi";
+	pinctrl-names = "default";
+	pinctrl-0 = <&scif0_pins>;
+	status = "okay";
+};
+
+/*
+ * OLED (SSD1309) pixel bus: RSPI0, P6_0=SCK P6_2=MOSI (func 3). No MISO/SSL —
+ * the display is write-only and its chip-select is mediated by the PIC, so
+ * leave SSL0 unmuxed. CS/D-C/power go through the deluge-pic node (&scif1).
+ */
+&pinctrl {
+	rspi0_pins: rspi0 {
+		pinmux = <RZA1_PINMUX(6, 0, 3)>,	/* RSPCK0 (SCK)  */
+			 <RZA1_PINMUX(6, 2, 3)>;	/* MOSI0  (MOSI) */
+	};
+};
+
+&spi0 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&rspi0_pins>;
+	status = "okay";
+	/* index 0 = OLED (native/PIC-mediated, unchanged); index 1 = CV DAC on P6.1. */
+	cs-gpios = <0>, <&port6 1 GPIO_ACTIVE_LOW>;
+
+	oled: oled@0 {
+		compatible = "synthstrom,deluge-oled";
+		reg = <0>;
+		spi-max-frequency = <10000000>;
+		synthstrom,pic = <&scif1>;	/* the deluge-pic device */
+	};
+
+	/* CV outputs: MAX5136 quad 16-bit DAC (2 channels wired). Shares the bus
+	 * with the OLED; 8-bit words + gpio CS so the controller is never
+	 * reconfigured. */
+	cvdac: dac@1 {
+		compatible = "synthstrom,deluge-cv";
+		reg = <1>;
+		spi-max-frequency = <10000000>;
+	};
+};
+
+/*
+ * Front-panel LED output: 36 indicator LEDs + 2 gold-knob 4-LED
+ * columns, driven over the PIC (SCIF1 TX). LED-class consumer of deluge-pic.
+ */
+/ {
+	deluge_leds: leds {
+		compatible = "synthstrom,deluge-leds";
+		synthstrom,pic = <&scif1>;
+	};
+};
+
+/*
+ * SYNC LED (P6_7): a plain GPIO LED, not PIC-mediated like the front-panel
+ * indicators above. Exposed as /sys/class/leds/deluge:sync so libdeluge's
+ * deluge_leds_sync() can drive it. Active-high (P6_7 high = lit), matching the
+ * bare-metal SDK. P6_7 is otherwise unused; the RZ/A1 pinctrl gpio-ranges put
+ * the pin in port mode on request, so no explicit pinmux entry is needed
+ * (as with the CV-DAC / codec-power / jack-detect GPIOs).
+ */
+/ {
+	deluge_sync_led: sync-led {
+		compatible = "gpio-leds";
+		led-sync {
+			label = "deluge:sync";
+			gpios = <&port6 7 GPIO_ACTIVE_HIGH>;
+			default-state = "off";
+		};
+	};
+};
+
+/*
+ * RGB pad grid: 18x8 pad LEDs as an fbdev, streamed to the PIC over
+ * SCIF1 TX. Framebuffer consumer of deluge-pic.
+ */
+/ {
+	deluge_pads: pads {
+		compatible = "synthstrom,deluge-pads";
+		synthstrom,pic = <&scif1>;
+	};
+};
+
+/* ---- Audio: SSI0/SSIF0 I2S -> hardware-strapped codec ------------------ */
+/* Direct SSI TX+RX DMA (no SCUX), 44.1 kHz / S24_LE / stereo, SSI master.
+ * External 22.5792 MHz AUDIO_X1 crystal is the codec master clock (also the
+ * SSI clock source, CKS=0). CODEC_POWER (P6.12) is raised by the machine
+ * driver after a 5 ms mclk-stable delay; SPEAKER_ENABLE (P4.1, high = on-board
+ * amplifier on) is raised after the card registers. */
+
+/ {
+	audio_x1: audio_x1 {
+		compatible = "fixed-clock";
+		#clock-cells = <0>;
+		clock-frequency = <22579200>;	/* 512 x 44.1 kHz */
+	};
+
+	sound {
+		compatible = "synthstrom,deluge-audio";
+		sound-dai = <&ssi0>;		/* CPU DAI (ssi0 has #sound-dai-cells=<0>) */
+		clocks = <&audio_x1>;
+		clock-names = "mclk";
+		codec-power-gpios = <&port6 12 GPIO_ACTIVE_HIGH>;
+		speaker-enable-gpios = <&port4 1 GPIO_ACTIVE_HIGH>;
+		synthstrom,midi = <&scif0>;	/* DIN MIDI aux component */
+		/* Jack detect (high = inserted). The speaker amp mutes whenever a
+		 * headphone or line-out is plugged (deluge-bsp/jacks.rs policy).
+		 *
+		 * Only the OUTPUT jacks drive that policy. The INPUT jacks
+		 * (line-in, mic) do not affect the speaker and are declared purely
+		 * so userspace can read them — completing the five detect lines the
+		 * bare-metal SDK already exposes (deluge-bsp/src/jacks.rs pin map:
+		 * HEADPHONE 6/5, LINE_IN 6/6, MIC 7/9, LINE_OUT_L 6/3,
+		 * LINE_OUT_R 6/4). */
+		headphone-det-gpios = <&port6 5 GPIO_ACTIVE_HIGH>;
+		lineout-det-gpios = <&port6 3 GPIO_ACTIVE_HIGH>,	/* LINE_OUT_L */
+				    <&port6 4 GPIO_ACTIVE_HIGH>;	/* LINE_OUT_R */
+		linein-det-gpios = <&port6 6 GPIO_ACTIVE_HIGH>;
+		mic-det-gpios = <&port7 9 GPIO_ACTIVE_HIGH>;
+	};
+};
+
+&pinctrl {
+	ssi0_pins: ssi0 {
+		pinmux = <RZA1_PINMUX(6,  8, 3)>,	/* SSITXD0 */
+			 <RZA1_PINMUX(6,  9, 3)>,	/* SSISCK0 */
+			 <RZA1_PINMUX(6, 10, 3)>,	/* SSIWS0  */
+			 <RZA1_PINMUX(6, 11, 3)>,	/* SSIRXD0 */
+			 <RZA1_PINMUX(7, 11, 6)>;	/* AUDIO_XOUT (mclk out) */
+	};
+};
+
+&{/soc} {
+	/* MSTP11: SSI module clocks (absent from the SoC dtsi). */
+	mstp11_clks: mstp11_clks@fcfe0440 {
+		#clock-cells = <1>;
+		compatible = "renesas,r7s72100-mstp-clocks",
+			     "renesas,cpg-mstp-clocks";
+		reg = <0xfcfe0440 4>;
+		clocks = <&p1_clk>, <&p1_clk>, <&p1_clk>,
+			 <&p1_clk>, <&p1_clk>, <&p1_clk>;
+		clock-indices = <
+			R7S72100_CLK_SSI0 R7S72100_CLK_SSI1 R7S72100_CLK_SSI2
+			R7S72100_CLK_SSI3 R7S72100_CLK_SSI4 R7S72100_CLK_SSI5
+		>;
+		clock-output-names = "ssi0", "ssi1", "ssi2",
+				     "ssi3", "ssi4", "ssi5";
+	};
+
+	ssi0: ssi@e820b000 {
+		compatible = "synthstrom,deluge-ssi";
+		reg = <0xe820b000 0x40>;	/* SSI0 */
+		/* The driver drives DMAC ch6 (TX) / ch7 (RX) directly (raw
+		 * link-descriptor DMA): it ioremaps the DMAC (0xe8200000) + DMARS
+		 * (0xfcfe1000) at fixed addresses. It owns the ch6/ch7 transfer-end
+		 * (DMAINT) interrupts to advance the ALSA period pointer — GIC SPI
+		 * 15/16 (= DMAC per-channel IRQ 6/7). rz-dmac is capped to ch0-5 so
+		 * these are free. */
+		interrupts = <GIC_SPI 15 IRQ_TYPE_EDGE_RISING>,	/* ch6 = SSI0 TX */
+			     <GIC_SPI 16 IRQ_TYPE_EDGE_RISING>;	/* ch7 = SSI0 RX */
+		interrupt-names = "tx", "rx";
+		sram = <&sram>;			/* DMA descriptors + audio buffer in on-chip SRAM */
+		clocks = <&mstp11_clks R7S72100_CLK_SSI0>, <&audio_x1>;
+		clock-names = "ssi", "audio_clk1";
+		pinctrl-names = "default";
+		pinctrl-0 = <&ssi0_pins>;
+		#sound-dai-cells = <0>;
+	};
+};

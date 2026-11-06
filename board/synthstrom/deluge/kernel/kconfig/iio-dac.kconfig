@@ -1,0 +1,7 @@
+config DELUGE_CV
+	tristate "Synthstrom Deluge CV (MAX5136 SPI DAC)"
+	depends on SPI
+	help
+	  CV voltage outputs for the Synthstrom Deluge: a MAX5136 quad 16-bit
+	  SPI DAC on RSPI0 (shared with the OLED), exposed as an IIO device with
+	  two out_voltage channels.

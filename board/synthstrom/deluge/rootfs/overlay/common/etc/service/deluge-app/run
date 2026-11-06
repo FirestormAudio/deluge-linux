@@ -1,0 +1,7 @@
+#!/bin/sh
+exec >/dev/kmsg 2>&1
+# Splash to 100%, then blank the OLED so the app owns the display.
+[ -n "$SPLASH_FB" ] && [ -x /usr/bin/splash ] && /usr/bin/splash 100 2>/dev/null
+[ -n "$SPLASH_FB" ] && /bin/busybox dd if=/dev/zero of="$SPLASH_FB" bs=4096 count=1 2>/dev/null
+echo "deluge: launching deluge-app"
+exec /usr/bin/deluge-app
