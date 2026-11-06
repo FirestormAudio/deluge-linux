@@ -18,11 +18,24 @@ pub fn apps_dir() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("/sd/LINUX/APPS"))
 }
 
-/// List regular, executable files in `dir`, sorted by display name.
+/// True if `path` starts with an ELF32 little-endian header for an ARM
+/// (`EM_ARM`) executable or PIE (`ET_EXEC` / `ET_DYN`). Any read error is false.
+pub fn is_arm_elf(path: &Path) -> bool {
+    use std::io::Read;
+    let mut h = [0u8; 20];
+    let ok = std::fs::File::open(path).and_then(|mut f| f.read_exact(&mut h)).is_ok();
+    if !ok || h[..4] != [0x7f, b'E', b'L', b'F'] || h[4] != 1 || h[5] != 1 {
+        return false;
+    }
+    let e_type = u16::from_le_bytes([h[16], h[17]]);
+    let e_machine = u16::from_le_bytes([h[18], h[19]]);
+    matches!(e_type, 2 | 3) && e_machine == 40
+}
+
+/// List the ARM executables in `dir` (see [`is_arm_elf`]), skipping
+/// dotfiles, sorted by display name.
 /// A missing or unreadable directory yields an empty list.
 pub fn scan(dir: &Path) -> Vec<AppEntry> {
-    use std::os::unix::fs::PermissionsExt;
-
     let mut out = Vec::new();
     let Ok(rd) = std::fs::read_dir(dir) else {
         return out;
@@ -33,12 +46,15 @@ pub fn scan(dir: &Path) -> Vec<AppEntry> {
         if !meta.is_file() {
             continue;
         }
-        if meta.permissions().mode() & 0o111 == 0 {
-            continue; // not executable by anyone
-        }
         let Some(stem) = path.file_name().and_then(|s| s.to_str()) else {
             continue;
         };
+        // The card is vfat: every file shows as 0755, so the exec bit says
+        // nothing. List only ARM executables, and skip dotfiles (macOS `._*`,
+        // `.DS_Store`).
+        if stem.starts_with('.') || !is_arm_elf(&path) {
+            continue;
+        }
         out.push(AppEntry {
             path: path.clone(),
             display_name: stem.to_uppercase(),
@@ -53,10 +69,25 @@ mod tests {
     use super::*;
     use std::os::unix::fs::PermissionsExt;
 
-    fn write_exec(dir: &Path, name: &str) {
+    /// A minimal ELF32 little-endian header (enough for `is_arm_elf`).
+    fn elf_header(e_type: u16, e_machine: u16) -> Vec<u8> {
+        let mut h = vec![0x7f, b'E', b'L', b'F', 1, 1, 1, 0];
+        h.resize(16, 0);
+        h.extend_from_slice(&e_type.to_le_bytes());
+        h.extend_from_slice(&e_machine.to_le_bytes());
+        h.resize(52, 0);
+        h
+    }
+
+    fn write_file(dir: &Path, name: &str, bytes: &[u8]) {
         let p = dir.join(name);
-        std::fs::write(&p, b"#!/bin/sh\n").unwrap();
+        std::fs::write(&p, bytes).unwrap();
         std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+
+    /// An ARM executable, as the SD card shows it (vfat: every file is 0755).
+    fn write_exec(dir: &Path, name: &str) {
+        write_file(dir, name, &elf_header(2, 40));
     }
 
     fn tmpdir() -> PathBuf {
@@ -98,6 +129,42 @@ mod tests {
         let apps = scan(&d);
         assert_eq!(apps.len(), 1);
         assert_eq!(apps[0].display_name, "RUNNABLE");
+    }
+
+    #[test]
+    fn lists_only_arm_elf() {
+        let d = tmpdir();
+        write_exec(&d, "arm");
+        write_file(&d, "x86", &elf_header(2, 62));
+        write_file(&d, "script", b"#!/bin/sh\necho hi\n");
+        write_file(&d, "readme.txt", b"hello");
+        let names: Vec<_> = scan(&d).into_iter().map(|e| e.display_name).collect();
+        assert_eq!(names, vec!["ARM"]);
+    }
+
+    #[test]
+    fn pie_is_listed() {
+        let d = tmpdir();
+        write_file(&d, "pie", &elf_header(3, 40));
+        assert_eq!(scan(&d).len(), 1);
+    }
+
+    #[test]
+    fn skips_dotfiles() {
+        let d = tmpdir();
+        write_exec(&d, "._spark");
+        write_exec(&d, ".DS_Store");
+        write_exec(&d, "spark");
+        let names: Vec<_> = scan(&d).into_iter().map(|e| e.display_name).collect();
+        assert_eq!(names, vec!["SPARK"]);
+    }
+
+    #[test]
+    fn is_arm_elf_rejects_short_and_missing_files() {
+        let d = tmpdir();
+        write_file(&d, "short", &[0x7f, b'E', b'L', b'F']);
+        assert!(!is_arm_elf(&d.join("short")));
+        assert!(!is_arm_elf(&d.join("absent")));
     }
 
     #[test]

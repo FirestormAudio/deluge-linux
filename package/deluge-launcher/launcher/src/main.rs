@@ -4,6 +4,7 @@
 //! encoder, and always returns here on SHIFT+TRIPLETS+LEARN held ~1s.
 //! SHIFT+SELECT opens the settings screen, which offers an SD-safe shutdown.
 
+mod applog;
 mod apps;
 mod killwatch;
 mod model;
